@@ -3,3 +3,8 @@ POSTGRES_PORT = ''
 POSTGRES_DB = ''
 POSTGRES_USER = ''
 POSTGRES_PASSWORD = ''
+
+# BigQuery Configuration
+BIGQUERY_PROJECT_ID = 'prod-default-1'
+BQ_CONNECTION_REGION = 'us-central1'
+BQ_CONNECTION_NAME = 'Celsius-Prod'

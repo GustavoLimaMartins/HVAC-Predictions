@@ -2,12 +2,17 @@ from use_case import data_modeling
 from db_setup import client
 from db_setup.postgre_sql import SyntaxPostgreeSQL as pg_query
 from db_setup.google_big_query import SyntaxBigQuery as bq_query
+from db_setup.my_sql import SyntaxMySQL as mysql_query
+from dataframe.schema import DataFrameFormatter
+from dataframe.complementary import enrich_dataframe_with_all_features
 import polars as pl
 from tqdm import tqdm
+from pathlib import Path
+from datetime import datetime, date
 
 
 def save_consolidated_consumption(df_direct: pl.DataFrame, df_indirect: pl.DataFrame = None) -> None:
-    """Consolida e salva dados de consumo direto e indireto em CSV.
+    """Consolida e salva dados de consumo direto e indireto em CSV. Dados brutos para validação e formatação final para ML.
     
     Args:
         df_direct: DataFrame com dados de consumo direto
@@ -32,10 +37,30 @@ def save_consolidated_consumption(df_direct: pl.DataFrame, df_indirect: pl.DataF
     
     print(f"Colunas: {df_consolidated.columns}")
     
-    # Salva DataFrame consolidado em CSV
-    output_path = r'use_case\output_files\consumption_consolidated.csv'
-    df_consolidated.write_csv(output_path)
-    print(f"Arquivo salvo: {output_path}")
+    # Salva DataFrame consolidado bruto em CSV
+    output_path_raw = r'use_case\files\consumption_consolidated.csv'
+    df_consolidated.write_csv(output_path_raw)
+    print(f"Arquivo bruto salvo: {output_path_raw}")
+    
+    # Enriquece com features complementares (estações, clima, grupos regionais)
+    print("\n=== ENRIQUECIMENTO COM FEATURES COMPLEMENTARES ===")
+    df_enriched = enrich_dataframe_with_all_features(df_consolidated)
+    print(f"Registros após enriquecimento: {df_enriched.shape[0]}")
+    print(f"Colunas após enriquecimento: {df_enriched.columns}")
+    
+    # Aplica formatação para schema final de ML
+    print("\n=== FORMATAÇÃO FINAL DO SCHEMA ===")
+    formatter = DataFrameFormatter()
+    df_formatted = formatter.format_for_model(df_enriched)
+    
+    print(f"Registros após formatação: {df_formatted.shape[0]}")
+    print(f"Colunas finais: {df_formatted.columns}")
+    print(f"Schema final: {df_formatted.schema}")
+    
+    # Salva DataFrame formatado em CSV
+    output_path_final = r'use_case\files\final_dataframe.csv'
+    df_formatted.write_csv(output_path_final)
+    print(f"Arquivo formatado salvo: {output_path_final}")
 
 
 if __name__ == "__main__":
@@ -43,21 +68,91 @@ if __name__ == "__main__":
     print("INICIANDO PROCESSAMENTO DE CONSUMO HVAC")
     print("=" * 80)
     
+    # Verifica se o arquivo consolidado já existe e foi atualizado hoje
+    output_path_raw = Path(r'use_case\files\consumption_consolidated.csv')
+    output_path_final = Path(r'use_case\files\final_dataframe.csv')
+    
+    if output_path_raw.exists():
+        # Obtém a data de modificação do arquivo
+        modification_time = datetime.fromtimestamp(output_path_raw.stat().st_mtime)
+        modification_date = modification_time.date()
+        today = date.today()
+        
+        print(f"\n=== VERIFICAÇÃO DE CACHE ===")
+        print(f"Arquivo encontrado: {output_path_raw}")
+        print(f"Data de modificação: {modification_date}")
+        print(f"Data de hoje: {today}")
+        
+        if modification_date == today:
+            print("✓ Arquivo foi atualizado hoje. Reaproveitando dados existentes...")
+            
+            # Carrega o arquivo consolidado existente
+            df_consolidated = pl.read_csv(str(output_path_raw))
+            print(f"✓ {df_consolidated.shape[0]} registros carregados do cache")
+            print(f"  Colunas: {df_consolidated.columns}")
+            
+            # Enriquece com features complementares (estações, clima, grupos regionais)
+            print("\n=== ENRIQUECIMENTO COM FEATURES COMPLEMENTARES ===")
+            df_enriched = enrich_dataframe_with_all_features(df_consolidated)
+            print(f"Registros após enriquecimento: {df_enriched.shape[0]}")
+            print(f"Colunas após enriquecimento: {df_enriched.columns}")
+            
+            # Aplica formatação para schema final de ML
+            print("\n=== FORMATAÇÃO FINAL DO SCHEMA ===")
+            formatter = DataFrameFormatter()
+            df_formatted = formatter.format_for_model(df_enriched)
+            
+            print(f"Registros após formatação: {df_formatted.shape[0]}")
+            print(f"Colunas finais: {df_formatted.columns}")
+            print(f"Schema final: {df_formatted.schema}")
+            
+            # Salva DataFrame formatado em CSV
+            df_formatted.write_csv(str(output_path_final))
+            print(f"Arquivo formatado salvo: {output_path_final}")
+            
+            print("\n" + "=" * 80)
+            print("PROCESSAMENTO CONCLUÍDO (CACHE REUTILIZADO)")
+            print("=" * 80)
+            exit(0)
+        else:
+            print("⚠ Arquivo desatualizado. Iniciando reprocessamento completo...")
+    else:
+        print("\n⚠ Arquivo consolidado não encontrado. Iniciando processamento completo...")
+    
     # Processa o arquivo CSV de unidades Bradesco
     print("\n[1/7] Carregando dados das unidades...")
-    csv_path = r'use_case\BradescoUnidadesSemAuto.csv'
+    csv_path = r'use_case\files\BradescoUnidadesSemAuto.csv'
     df_units = data_modeling.process_client_units(csv_path)
     print(f"✓ {df_units.shape[0]} unidades carregadas")
 
     # Conexão com PostgreSQL e execução de query
-    print("\n[2/7] Consultando dispositivos no PostgreSQL...")
+    print("\n[2/8] Consultando dispositivos no PostgreSQL...")
     pg_client = client.DatabaseConnectionClient(db_type=2)
     query_dev_by_units = pg_query.get_devices_by_units(units=df_units['id_bradesco'].to_list())
     df_devices_by_units = pg_client.data_convert_to_polars(query_dev_by_units)
     print(f"✓ {df_devices_by_units.shape[0]} dispositivos encontrados")
     
+    # Consulta dados de localização e tipo de máquina via MySQL (BigQuery Federation)
+    print("\n[3/8] Consultando dados de localização e machine_type via MySQL...")
+    mysql_client = client.DatabaseConnectionClient(db_type=3)
+    query_location = mysql_query.get_environment_monitoring_data()
+    df_location_data = mysql_client.data_convert_to_polars(query_location)
+    
+    # Renomeia colunas para match com o schema existente e converte tipos
+    df_location_data = df_location_data.rename({
+        'DEVICE_CODE': 'device_code'
+    }).with_columns([
+        pl.col('device_code').cast(pl.Utf8),
+        pl.col('machine_type').cast(pl.Utf8),
+        pl.col('latitude').cast(pl.Float64),
+        pl.col('longitude').cast(pl.Float64)
+    ])
+    
+    print(f"✓ {df_location_data.shape[0]} registros de localização obtidos")
+    print(f"  Colunas: {df_location_data.columns}")
+    
     # Consulta registros de disponibilidade para filtrar datas válidas
-    print("\n[3/7] Consultando disponibilidade dos dispositivos...")
+    print("\n[4/8] Consultando disponibilidade dos dispositivos...")
     date_min_global = df_units['data_instalacao'].min()
     date_max_global = df_units['data_inicio_automacao'].max()
     query_disponibility = pg_query.get_record_dates_above_disponibility_threshold(
@@ -81,7 +176,7 @@ if __name__ == "__main__":
     versions = df_versions_by_units['device_version'].unique().to_list()
     
     # Consulta famílias de dispositivos com dados válidos de consumo no PostgreSQL
-    print("\n[4/7] Identificando versões com dados de corrente...")
+    print("\n[5/8] Identificando versões com dados de corrente...")
     query_valid_families = pg_query.get_devices_families_with_current_parameter()
     df_valid_families = pg_client.data_convert_to_polars(query_valid_families)
     valid_device_prefixes = df_valid_families['device_prefix'].to_list()
@@ -93,7 +188,7 @@ if __name__ == "__main__":
     print(f"  Versões selecionadas: {versions_filtered}")
     
     # Cria cliente BigQuery uma única vez
-    print("\n[5/7] Conectando ao BigQuery...")
+    print("\n[6/8] Conectando ao BigQuery...")
     bq_client = client.DatabaseConnectionClient(db_type=1)
     print("✓ Conexão estabelecida")
     
@@ -103,7 +198,7 @@ if __name__ == "__main__":
     # Pré-calcula dataframe com unit_id e datas para reutilização
     units_with_dates = df_units.select(['id_bradesco', 'data_instalacao', 'data_inicio_automacao'])
 
-    print("\n[6/7] Processando consumo DIRETO (BigQuery)...")
+    print("\n[7/8] Processando consumo DIRETO (BigQuery)...")
     for version in tqdm(versions_filtered, desc="Progresso BigQuery", unit="versão"):
         df_target_units = df_versions_by_units.filter(pl.col('device_version') == version).select('unit_id')
         df_date_units = units_with_dates.join(df_target_units, left_on='id_bradesco', right_on='unit_id', how='inner')
@@ -170,6 +265,12 @@ if __name__ == "__main__":
                 pl.lit(version).cast(pl.Utf8).alias('device_version'),
                 pl.lit('direto').cast(pl.Utf8).alias('metodo')
             ])
+            .join(
+                df_location_data,
+                left_on='device_id',
+                right_on='device_code',
+                how='left'
+            )
             .select([
                 'unit_id', 
                 'device_id',
@@ -179,7 +280,10 @@ if __name__ == "__main__":
                 'consumo_kwh',
                 'data_instalacao',
                 'data_inicio_automacao',
-                'metodo'
+                'metodo',
+                'machine_type',
+                'latitude',
+                'longitude'
             ])
         )
         
@@ -200,7 +304,10 @@ if __name__ == "__main__":
             pl.col('consumo_kwh').cast(pl.Float64),
             pl.col('data_instalacao').cast(pl.Date),
             pl.col('data_inicio_automacao').cast(pl.Date),
-            pl.col('metodo').cast(pl.Utf8)
+            pl.col('metodo').cast(pl.Utf8),
+            pl.col('machine_type').cast(pl.Utf8),
+            pl.col('latitude').cast(pl.Float64),
+            pl.col('longitude').cast(pl.Float64)
         ])
         
         print(f"\n✓ Consumo direto processado: {df_final.shape[0]} registros")
@@ -213,7 +320,7 @@ if __name__ == "__main__":
         all_devices = df_devices_by_units['device_code'].unique().to_list()
         devices_without_consumption = [d for d in all_devices if d not in devices_with_consumption]
         
-        print(f"\n[7/7] Processando consumo INDIRETO (PostgreSQL)...")
+        print(f"\n[8/8] Processando consumo INDIRETO (PostgreSQL)...")
         print(f"  Dispositivos com consumo direto: {len(devices_with_consumption)}")
         print(f"  Dispositivos para método indireto: {len(devices_without_consumption)}")
         
@@ -282,6 +389,12 @@ if __name__ == "__main__":
                             right_on=['device_code', 'record_date'],
                             how='inner'
                         )
+                        .join(
+                            df_location_data,
+                            left_on='device_id',
+                            right_on='device_code',
+                            how='left'
+                        )
                         .select([
                             'unit_id',
                             'device_id',
@@ -291,7 +404,10 @@ if __name__ == "__main__":
                             'consumo_kwh',
                             'data_instalacao',
                             'data_inicio_automacao',
-                            'metodo'
+                            'metodo',
+                            'machine_type',
+                            'latitude',
+                            'longitude'
                         ])
                     )
                     

@@ -3,7 +3,6 @@ from dotenv import load_dotenv
 from google.cloud import bigquery
 import polars as pl
 
-
 class SyntaxMySQL:
     """
     Classe para executar consultas MySQL via BigQuery EXTERNAL_QUERY (CloudSQL Federation).
@@ -32,10 +31,6 @@ class SyntaxMySQL:
         
         # Cliente BigQuery
         self.client = bigquery.Client(project=self.project_id)
-        
-        print(f"✓ SyntaxMySQL inicializado")
-        print(f"  Project: {self.project_id}")
-        print(f"  Connection: {self.connection_id}")
     
     def execute_query(self, query_mysql: str, verbose: bool = True) -> pl.DataFrame:
         """
@@ -79,39 +74,82 @@ class SyntaxMySQL:
     @staticmethod
     def get_environment_monitoring_data() -> str:
         """
-        Retorna query SQL para obter dados de monitoramento de ambientes com DUT3.
+        Retorna query SQL para obter dados de dispositivos com localização e tipo de máquina.
         
         Returns:
-            str: Query MySQL para dados de ambientes, máquinas, assets e DUT3
+            str: Query MySQL para device_code, machine_type, latitude e longitude
         """
         return """
-        SELECT
-            e.ID                AS ENVIRONMENT_ID,
-            e.ENVIRONMENT_NAME,
-            m.NAME              AS MACHINE_NAME,
-            m.TYPE              AS MACHINE_TYPE,
-            a.NAME              AS ASSET_NAME,
-            ahh.H_DESC          AS HEALTH_DESCRIPTION,
-            d.DEVICE_CODE       AS DUT3_DEVICE_CODE,
-            rt.USEPERIOD        AS ROOM_TYPE_USEPERIOD
-        FROM ENVIRONMENTS e
-        LEFT JOIN DUTS_MONITORING dm        ON dm.ENVIRONMENT_ID = e.ID
-        LEFT JOIN DUTS_REFERENCE dr         ON dr.DUT_MONITORING_ID = dm.ID
-        LEFT JOIN MACHINES m                ON m.ID = dr.MACHINE_ID
-        LEFT JOIN EVAPORATORS ev            ON ev.MACHINE_ID = m.ID
-        LEFT JOIN ASSETS a                  ON a.ID = ev.ASSET_ID
-        LEFT JOIN ASSETS_HEALTH ah          ON ah.ASSET_ID = a.ID
-        LEFT JOIN ASSETS_HEALTH_HIST ahh    ON ahh.ID = ah.HEALTH_HIST_ID
-        LEFT JOIN DUTS_DEVICES dd           ON dd.ID = dm.DUT_DEVICE_ID
-        LEFT JOIN DEVICES d                 ON d.ID = dd.DEVICE_ID
-                                            AND d.DEVICE_CODE LIKE 'DUT3%'
-        LEFT JOIN ENVIRONMENTS_ROOM_TYPES ert ON ert.ENVIRONMENT_ID = e.ID
-        LEFT JOIN ROOMTYPES rt              ON rt.RTYPE_ID = ert.RTYPE_ID
-        WHERE e.ID IS NOT NULL
+        -- Query para associar device_code com machine_type e localização
+        -- Database: dashprod
+        -- Utilizando CTEs para melhor organização e legibilidade
+        WITH dut_associations AS (
+            -- Associação de DUTs com dados de máquina e localização
+            SELECT DISTINCT
+                d.DEVICE_CODE,
+                m.TYPE AS machine_type,
+                u.LAT AS latitude,
+                u.LON AS longitude
+            FROM 
+                DEVICES d
+                INNER JOIN DUTS_DEVICES dut_dev ON d.ID = dut_dev.DEVICE_ID
+                INNER JOIN DUTS_AUTOMATION dut_auto ON dut_dev.ID = dut_auto.DUT_DEVICE_ID
+                INNER JOIN MACHINES m ON dut_auto.MACHINE_ID = m.ID
+                LEFT JOIN CLUNITS u ON m.UNIT_ID = u.UNIT_ID
+            WHERE u.LAT IS NOT NULL AND u.LON IS NOT NULL
+        ),
+        dac_condenser_associations AS (
+            -- Associação de DACs (condensers) com dados de máquina e localização
+            SELECT DISTINCT
+                d.DEVICE_CODE,
+                m.TYPE AS machine_type,
+                u.LAT AS latitude,
+                u.LON AS longitude
+            FROM 
+                DEVICES d
+                INNER JOIN DACS_DEVICES dac_dev ON d.ID = dac_dev.DEVICE_ID
+                INNER JOIN DACS_CONDENSERS dac_cond ON dac_dev.ID = dac_cond.DAC_DEVICE_ID
+                INNER JOIN CONDENSERS c ON dac_cond.CONDENSER_ID = c.ID
+                INNER JOIN MACHINES m ON c.MACHINE_ID = m.ID
+                LEFT JOIN CLUNITS u ON m.UNIT_ID = u.UNIT_ID
+            WHERE u.LAT IS NOT NULL AND u.LON IS NOT NULL
+        )
+        -- Combinação de todas as associações, removendo duplicatas
+        SELECT DISTINCT
+            DEVICE_CODE,
+            machine_type,
+            latitude,
+            longitude
+        FROM dut_associations
+        UNION
+        SELECT DISTINCT
+            DEVICE_CODE,
+            machine_type,
+            latitude,
+            longitude
+        FROM dac_condenser_associations
+        ORDER BY DEVICE_CODE;
+        """
+    
+    @staticmethod
+    def get_unique_cities() -> str:
+        """
+        Retorna query SQL para obter cidades únicas.
+        
+        Returns:
+            str: Query MySQL para obter cidades únicas
+        """
+        return """
+        SELECT DISTINCT u.CITY_ID as cidade
+        FROM 
+            CLUNITS u
+        WHERE u.CITY_ID IS NOT NULL
+        ORDER BY 
+            u.CITY_ID ASC;
         """
 
 
-def consultar_mysql_via_bigquery():
+def query_mysql_by_bigquery():
     """
     Função helper para compatibilidade com código legado.
     Executa consulta de monitoramento de ambientes.
@@ -124,7 +162,7 @@ def consultar_mysql_via_bigquery():
 def main():
     """Função principal de teste"""
     print("=" * 80)
-    print("TESTE DE CONSULTA MYSQL (via BigQuery Federated Query)")
+    print("CONSULTA MYSQL (via BigQuery Federated Query)")
     print("=" * 80)
     
     try:
@@ -132,7 +170,7 @@ def main():
         mysql_client = SyntaxMySQL()
         
         # Obtém query de exemplo
-        query = SyntaxMySQL.get_environment_monitoring_data()
+        query = SyntaxMySQL.get_unique_cities()
         
         # Executa consulta
         df_result = mysql_client.execute_query(query)

@@ -1,30 +1,39 @@
 from google.cloud import bigquery
 import db_setup.postgre_sql as postgre_sql
+import db_setup.my_sql as my_sql
 import polars as pl
 
 class DatabaseConnectionClient:
     def __init__(self, db_type: int):
         """
-        Inicializa o cliente de conexão com o banco de dados, podendo ser Google BigQuery ou PostgreeSQL.
+        Inicializa o cliente de conexão com o banco de dados, podendo ser Google BigQuery, PostgreeSQL ou MySQL.
 
         Args:
-            db_type (int): Tipo do banco de dados. 1 para Google BigQuery, 2 para PostgreeSQL.
+            db_type (int): Tipo do banco de dados. 1 para Google BigQuery, 2 para PostgreeSQL, 3 para MySQL.
         """
+        self.db_type = db_type
         if db_type == 1:
             self.client = bigquery.Client()
         elif db_type == 2:
             self.client = postgre_sql.Client()
+        elif db_type == 3:
+            self.client = my_sql.SyntaxMySQL()
     
     def data_convert_to_polars(self, query: str) -> pl.DataFrame:
         """
-        Retorna um DataFrame do Polars a partir de uma query SQL executada no GoogleBigQuery ou PostgreeSQL.
+        Retorna um DataFrame do Polars a partir de uma query SQL executada no GoogleBigQuery, PostgreeSQL ou MySQL.
         
         Args:
-            query (str): Query SQL a ser executada no GoogleBigQuery ou PostgreeSQL (SyntaxBigQuery/SyntaxPostgreeSQL).
+            query (str): Query SQL a ser executada no GoogleBigQuery, PostgreeSQL ou MySQL.
         
         Returns:
             pl.DataFrame: DataFrame com os dados convertidos para Polars
         """
+        # MySQL já retorna Polars DataFrame diretamente
+        if self.db_type == 3:
+            return self.client.execute_query(query, verbose=False)
+        
+        # BigQuery e PostgreSQL usam o método query() padrão
         query_job = self.client.query(query)
         # 1. Faz o download direto em formato colunar (Arrow), muito mais rápido na rede
         arrow_table = query_job.to_arrow() 
@@ -49,3 +58,9 @@ if __name__ == "__main__":
     QUERY_PG = pg_query.get_devices_by_units(units=[302, 895, 1322])
     df_pg = pg_client.data_convert_to_polars(QUERY_PG)
     print(df_pg)
+
+    from my_sql import SyntaxMySQL as mysql_query
+    mysql_client = DatabaseConnectionClient(db_type=3)
+    QUERY_MYSQL = mysql_query.get_unique_cities()
+    df_mysql = mysql_client.data_convert_to_polars(QUERY_MYSQL)
+    print(df_mysql)

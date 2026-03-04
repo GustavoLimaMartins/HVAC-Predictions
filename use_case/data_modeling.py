@@ -51,7 +51,7 @@ def process_client_units(file_path: Union[str, Path]) -> pl.DataFrame:
 
 if __name__ == "__main__":
     # Exemplo de uso
-    csv_path = Path(__file__).parent / 'BradescoUnidadesSemAuto.csv'
+    csv_path = r'use_case\files\BradescoUnidadesSemAuto.csv'
     
     # Processa o arquivo
     df = process_client_units(csv_path)
