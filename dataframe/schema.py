@@ -69,6 +69,33 @@ class DataFrameFormatter:
         """
         return df.drop_nulls()
     
+    def format_date_columns(self, df: pl.DataFrame) -> pl.DataFrame:
+        """
+        Converte colunas de data para o tipo pl.Date.
+
+        Colunas do tipo String com formato 'YYYY-MM-DD' são convertidas
+        automaticamente. Colunas já tipadas como Date são ignoradas.
+
+        Args:
+            df: DataFrame com possíveis colunas de data como String
+
+        Returns:
+            DataFrame com colunas de data no tipo pl.Date
+        """
+        date_columns = [
+            col for col in df.columns
+            if df[col].dtype == pl.Utf8
+            and df[col].drop_nulls().head(1).to_list()
+            and len(str(df[col].drop_nulls().head(1).to_list()[0])) == 10
+            and str(df[col].drop_nulls().head(1).to_list()[0]).count('-') == 2
+        ]
+        if not date_columns:
+            return df
+        return df.with_columns([
+            pl.col(col).str.to_date("%Y-%m-%d").alias(col)
+            for col in date_columns
+        ])
+
     def format_for_model(self, df: pl.DataFrame) -> pl.DataFrame:
         """
         Pipeline completo de formatação para modelo.
@@ -85,31 +112,17 @@ class DataFrameFormatter:
             >>> formatter = DataFrameFormatter()
             >>> df_ready = formatter.format_for_model(df_raw)
         """
-        print(f"\n[Formatação] Registros iniciais: {df.shape[0]}")
-        print(f"[Formatação] Colunas iniciais: {df.columns}")
-        
         # 1. Cria features binárias
         df_with_features = self.create_device_type_features(df)
-        print(f"[Formatação] ✓ Features binárias criadas: is_dac, is_dut")
         
-        # 2. Remove colunas desnecessárias
-        existing_to_drop = [col for col in self.columns_to_drop if col in df_with_features.columns]
+        # 2. Formata colunas de data
+        df_with_features = self.format_date_columns(df_with_features)
+        
+        # 3. Remove colunas desnecessárias
         df_formatted = self.drop_unnecessary_columns(df_with_features)
-        if existing_to_drop:
-            print(f"[Formatação] ✓ Colunas removidas: {existing_to_drop}")
         
-        # 3. Remove linhas com nulos
-        null_count_before = df_formatted.shape[0]
+        # 4. Remove linhas com nulos
         df_clean = self.drop_null_rows(df_formatted)
-        removed_nulls = null_count_before - df_clean.shape[0]
-        
-        if removed_nulls > 0:
-            print(f"[Formatação] ✓ Removidos {removed_nulls} registros com valores nulos")
-        else:
-            print(f"[Formatação] ✓ Nenhum registro com nulos encontrado")
-        
-        print(f"[Formatação] Registros finais: {df_clean.shape[0]}")
-        print(f"[Formatação] Colunas finais ({len(df_clean.columns)}): {df_clean.columns}")
         
         return df_clean
     
