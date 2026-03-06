@@ -1,364 +1,379 @@
+"""
+Regional Group Classifier — DBSCAN + Haversine
+===============================================
+
+Descobre automaticamente "zonas quentes" (clusters geográficos) a partir de
+combinações únicas de latitude/longitude, sem necessidade de definir o número
+de grupos previamente.
+
+Por que DBSCAN + Haversine?
+──────────────────────────
+• DBSCAN não exige que o número de clusters seja informado.
+• Identifica pontos fora de qualquer zona ("ruído").
+• A métrica Haversine mede distâncias reais na superfície da Terra, levando em
+  conta sua forma esférica — impossível com geometria plana (Pitágoras).
+• O parâmetro `radius_km` é intuitivo: "agrupe pontos a até X km de distância".
+
+Fórmula de Haversine (usada internamente pelo sklearn)
+──────────────────────────────────────────────────────
+Dados dois pontos (φ₁,λ₁) e (φ₂,λ₂) em radianos:
+
+    a = sin²(Δφ/2) + cos(φ₁)·cos(φ₂)·sin²(Δλ/2)
+    d = 2R · arcsin(√a)          onde R ≈ 6 371 km
+"""
+
+from __future__ import annotations
+
 from typing import Optional
-import polars as pl
-from sklearn.cluster import KMeans
-from sklearn.preprocessing import StandardScaler
+
 import numpy as np
-from pathlib import Path
-import sys
+import polars as pl
+from sklearn.cluster import DBSCAN
+from sklearn.neighbors import KNeighborsClassifier
 
-# Adiciona path para importar módulos do projeto
-project_root = Path(__file__).parent.parent.parent.parent
-sys.path.insert(0, str(project_root))
-
-from db_setup.my_sql import SyntaxMySQL
+# ── Constante física ────────────────────────────────────────────────────────────
+EARTH_RADIUS_KM: float = 6_371.0
 
 
-class RegionalGroupClassifier:
+# ── Classe base: contrato comum a modelos geográficos não-supervisionados ───────
+
+class UnsupervisedGeoModel:
     """
-    Classificador de grupos regionais usando K-means clustering.
-    
-    Utiliza aprendizado não-supervisionado para identificar grupos regionais
-    baseados em coordenadas geográficas (latitude/longitude). O número de clusters
-    é automaticamente definido pela quantidade de cidades únicas no banco de dados.
-    
-    Attributes:
-        n_clusters (int): Número de clusters (igual ao número de cidades)
-        kmeans (KMeans): Modelo K-means treinado
-        scaler (StandardScaler): Normalizador de coordenadas
-        is_fitted (bool): Indica se o modelo foi treinado
-        
-    Example:
-        >>> classifier = RegionalGroupClassifier()
-        >>> classifier.fit(df_locations)
-        >>> df_enriched = classifier.predict(df_data)
+    Classe base para modelos de clustering geográfico não-supervisionados.
+
+    Define a interface mínima compartilhada por qualquer algoritmo de agrupamento
+    espacial: fit / predict / fit_predict e validação de colunas de coordenadas.
+
+    Subclasses devem obrigatoriamente implementar fit() e predict().
     """
-    
-    def __init__(self, random_state: int = 42):
-        """
-        Inicializa o classificador de grupos regionais.
-        
-        Args:
-            random_state (int): Seed para reprodutibilidade (padrão: 42)
-        """
-        self.n_clusters: Optional[int] = None
-        self.kmeans: Optional[KMeans] = None
-        self.scaler = StandardScaler()
-        self.is_fitted = False
-        self.random_state = random_state
-        self.mysql_client = SyntaxMySQL()
-        
-        print("✓ RegionalGroupClassifier inicializado")
-    
-    def _get_number_of_cities(self) -> int:
-        """
-        Obtém o número de cidades únicas do banco de dados.
-        
-        Returns:
-            int: Número de cidades únicas
-        """
-        query = SyntaxMySQL.get_unique_cities()
-        df_cities = self.mysql_client.execute_query(query, verbose=False)
-        n_cities = len(df_cities)
-        
-        print(f"✓ Número de cidades únicas encontradas: {n_cities}")
-        return n_cities
-    
-    def fit(self, df: pl.DataFrame) -> 'RegionalGroupClassifier':
-        """
-        Treina o modelo K-means com as coordenadas únicas do DataFrame.
-        
-        O número de clusters é automaticamente definido pela quantidade
-        de cidades únicas no banco de dados MySQL.
-        
-        IMPORTANTE: Remove automaticamente linhas com valores nulos em latitude/longitude
-        antes do treinamento, pois K-means não aceita valores NaN.
-        
-        Args:
-            df (pl.DataFrame): DataFrame com colunas 'latitude' e 'longitude'
-        
-        Returns:
-            RegionalGroupClassifier: Self para method chaining
-        
-        Raises:
-            ValueError: Se colunas latitude/longitude não existirem
-        """
-        # Validações
-        if 'latitude' not in df.columns or 'longitude' not in df.columns:
-            raise ValueError("DataFrame deve conter colunas 'latitude' e 'longitude'")
-        
-        # Remove nulos (K-means não aceita NaN)
-        original_count = df.shape[0]
-        df_clean = df.drop_nulls(subset=['latitude', 'longitude'])
-        removed_count = original_count - df_clean.shape[0]
-        
-        if removed_count > 0:
-            print(f"⚠️  Removidos {removed_count} registros com valores nulos em latitude/longitude")
-            print(f"   Registros válidos: {df_clean.shape[0]}")
-        
-        # Obtém número de cidades para definir clusters
-        self.n_clusters = self._get_number_of_cities()
-        
-        # Extrai coordenadas únicas
-        df_coords = df_clean.select(['latitude', 'longitude']).unique()
-        
-        if len(df_coords) < self.n_clusters:
-            print(f"⚠️  Aviso: Apenas {len(df_coords)} coordenadas únicas encontradas, mas {self.n_clusters} clusters solicitados")
-            print(f"   Ajustando para {len(df_coords)} clusters")
-            self.n_clusters = len(df_coords)
-        
-        # Converte para numpy array
-        coords_array = df_coords.to_numpy()
-        
-        # Normaliza as coordenadas
-        coords_scaled = self.scaler.fit_transform(coords_array)
-        
-        # Treina K-means
-        print(f"⏳ Treinando K-means com {self.n_clusters} clusters...")
-        self.kmeans = KMeans(
-            n_clusters=self.n_clusters,
-            random_state=self.random_state,
-            n_init=10,
-            max_iter=300
-        )
-        self.kmeans.fit(coords_scaled)
-        
-        self.is_fitted = True
-        print(f"✓ Modelo treinado com sucesso!")
-        print(f"  Inércia: {self.kmeans.inertia_:.2f}")
-        
-        return self
-    
-    def predict(self, df: pl.DataFrame) -> pl.DataFrame:
-        """
-        Adiciona coluna 'grupo_regional' ao DataFrame com os clusters preditos.
-        
-        Registros com latitude/longitude nulos recebem valor null na coluna 'grupo_regional'.
-        Isso mantém o mesmo número de linhas do DataFrame original para compatibilidade.
-        
-        Args:
-            df (pl.DataFrame): DataFrame com colunas 'latitude' e 'longitude'
-        
-        Returns:
-            pl.DataFrame: DataFrame original com nova coluna 'grupo_regional'
-        
-        Raises:
-            ValueError: Se modelo não foi treinado ou colunas necessárias não existem
-        """
-        if not self.is_fitted:
-            raise ValueError("Modelo não foi treinado. Execute fit() primeiro.")
-        
-        if 'latitude' not in df.columns or 'longitude' not in df.columns:
-            raise ValueError("DataFrame deve conter colunas 'latitude' e 'longitude'")
-        
-        # Identifica registros com coordenadas válidas (não-nulos)
-        mask_valid = (~df['latitude'].is_null()) & (~df['longitude'].is_null())
-        
-        # Filtra apenas coordenadas válidas para predição
-        df_valid = df.filter(mask_valid)
-        
-        if len(df_valid) == 0:
-            # Todos os registros têm coordenadas nulas
-            df_result = df.with_columns(
-                pl.lit(None).cast(pl.Utf8).alias('grupo_regional')
-            )
-            print("⚠️  Todos os registros possuem coordenadas nulas")
-            return df_result
-        
-        # Prepara coordenadas válidas
-        coords = df_valid.select(['latitude', 'longitude']).to_numpy()
-        
-        # Normaliza e prediz
-        coords_scaled = self.scaler.transform(coords)
-        predictions = self.kmeans.predict(coords_scaled)
-        
-        # Cria coluna temporária com índices
-        df_with_idx = df.with_row_index("__idx__")
-        df_valid_with_idx = df_with_idx.filter(mask_valid)
-        
-        # Cria DataFrame com predições e índices
-        df_predictions = pl.DataFrame({
-            '__idx__': df_valid_with_idx['__idx__'].to_list(),
-            'grupo_regional': predictions.astype(str)
-        })
-        
-        # Join para adicionar predições (nulos onde não havia coordenadas válidas)
-        df_result = (
-            df_with_idx
-            .join(df_predictions, on='__idx__', how='left')
-            .drop('__idx__')
-        )
-        
-        valid_count = len(df_valid)
-        null_count = len(df) - valid_count
-        
-        print(f"✓ Grupos regionais adicionados: {valid_count} registros")
-        if null_count > 0:
-            print(f"⚠️  {null_count} registros com coordenadas nulas (grupo_regional = null)")
-        
-        return df_result
-    
+
+    def __init__(self) -> None:
+        self.is_fitted: bool = False
+
     def fit_predict(self, df: pl.DataFrame) -> pl.DataFrame:
         """
-        Treina o modelo e retorna DataFrame com grupos regionais em uma única operação.
-        
+        Treina o modelo e retorna o DataFrame com grupos atribuídos.
+
+        Equivalente a chamar fit() seguido de predict() sobre o mesmo DataFrame.
+
         Args:
-            df (pl.DataFrame): DataFrame com colunas 'latitude' e 'longitude'
-        
+            df: DataFrame contendo ao menos as colunas 'latitude' e 'longitude'.
+
         Returns:
-            pl.DataFrame: DataFrame original com nova coluna 'grupo_regional'
+            DataFrame original com a coluna 'grupo_regional' adicionada.
         """
         self.fit(df)
         return self.predict(df)
-    
-    def get_cluster_centers(self) -> Optional[pl.DataFrame]:
+
+    # ── Utilitários protegidos ───────────────────────────────────────────────
+
+    def _validate_geo_columns(self, df: pl.DataFrame) -> None:
         """
-        Retorna as coordenadas dos centróides dos clusters.
-        
-        Returns:
-            pl.DataFrame: DataFrame com latitude/longitude dos centróides, ou None se não treinado
+        Valida a presença das colunas de coordenadas no DataFrame.
+
+        Raises:
+            ValueError: Se 'latitude' ou 'longitude' estiverem ausentes.
         """
-        if not self.is_fitted:
-            print("⚠️  Modelo não foi treinado ainda")
-            return None
-        
-        # Desnormaliza os centróides
-        centers_scaled = self.kmeans.cluster_centers_
-        centers = self.scaler.inverse_transform(centers_scaled)
-        
-        df_centers = pl.DataFrame({
-            'grupo_regional': [str(i) for i in range(self.n_clusters)],
-            'centroide_latitude': centers[:, 0],
-            'centroide_longitude': centers[:, 1]
-        })
-        
-        return df_centers
-    
-    def save_model_info(self, output_path: str = "regional_groups_info.csv") -> None:
+        missing = [c for c in ("latitude", "longitude") if c not in df.columns]
+        if missing:
+            raise ValueError(f"Colunas ausentes no DataFrame: {missing}")
+
+    @staticmethod
+    def _to_radians(df_coords: pl.DataFrame) -> np.ndarray:
         """
-        Salva informações dos centróides em arquivo CSV.
-        
+        Converte colunas latitude/longitude (em graus) para radianos.
+
+        O sklearn com metric='haversine' exige entrada em radianos.
+
         Args:
-            output_path (str): Caminho para salvar o arquivo
+            df_coords: DataFrame com colunas 'latitude' e 'longitude'.
+
+        Returns:
+            Array numpy de shape (n, 2) com valores em radianos.
+        """
+        return np.radians(df_coords.select(["latitude", "longitude"]).to_numpy())
+
+
+# ── Classifier ──────────────────────────────────────────────────────────────────
+
+class RegionalGroupClassifier(UnsupervisedGeoModel):
+    """
+    Classificador de grupos regionais usando DBSCAN + distância Haversine.
+
+    Descobre "zonas quentes" a partir da concentração de coordenadas únicas,
+    sem que o número de grupos precise ser informado previamente.
+
+    Parâmetros
+    ----------
+    radius_km   : Raio de vizinhança em km (parâmetro eps do DBSCAN).
+                  Semântica: "dois pontos fazem parte do mesmo grupo se
+                  estiverem a menos de radius_km km um do outro".
+    min_samples : Mínimo de pontos (inclusive o próprio) para que uma
+                  região seja considerada um cluster e não ruído.
+                  Valor padrão 4 → "pelo menos 3 vizinhos no raio".
+    noise_label : Rótulo atribuído a pontos fora de qualquer zona quente.
+
+    Atributos pós-treino
+    --------------------
+    is_fitted   : bool — True após fit().
+    n_clusters_ : int  — Número de zonas quentes encontradas (ruído excluído).
+    n_noise_    : int  — Pontos classificados como ruído (label DBSCAN = -1).
+
+    Como funciona internamente
+    --------------------------
+    1. Extrai combinações únicas de (latitude, longitude) sem nulos.
+    2. Converte para radianos (requisito do sklearn com metric='haversine').
+    3. DBSCAN agrupa pontos dentro de `radius_km` com ≥ `min_samples` vizinhos.
+    4. Mapeia cada coordenada única ao seu rótulo de cluster.
+    5. Para predição de pontos novos (não vistos no treino), um KNN 1-vizinho
+       com a mesma métrica Haversine é usado como fallback.
+
+    Example
+    -------
+    >>> clf = RegionalGroupClassifier(radius_km=10, min_samples=4)
+    >>> df_enriched = clf.fit_predict(df)
+    >>> print(clf.n_clusters_)
+    """
+
+    def __init__(
+        self,
+        radius_km: float = 10.0,
+        min_samples: int = 4,
+        noise_label: str = "ruido",
+    ) -> None:
+        super().__init__()
+
+        self.radius_km = radius_km
+        self.min_samples = min_samples
+        self.noise_label = noise_label
+
+        # eps convertido para radianos: distância / raio médio da Terra
+        self._eps_rad: float = radius_km / EARTH_RADIUS_KM
+
+        self._dbscan: Optional[DBSCAN] = None
+        self._knn: Optional[KNeighborsClassifier] = None
+        self._unique_coords: Optional[pl.DataFrame] = None
+        self._coord_labels: Optional[np.ndarray] = None
+
+        self.n_clusters_: int = 0
+        self.n_noise_: int = 0
+
+    # ── Treino ──────────────────────────────────────────────────────────────
+
+    def fit(self, df: pl.DataFrame) -> "RegionalGroupClassifier":
+        """
+        Treina o DBSCAN sobre as coordenadas únicas do DataFrame.
+
+        Linhas com latitude ou longitude nulos são ignoradas no treino.
+
+        Args:
+            df: DataFrame com colunas 'latitude' e 'longitude'.
+
+        Returns:
+            Self (para method chaining).
+
+        Raises:
+            ValueError: Se as colunas de coordenadas não existirem.
+        """
+        self._validate_geo_columns(df)
+
+        # Extrai coordenadas únicas válidas
+        self._unique_coords = (
+            df.select(["latitude", "longitude"])
+            .drop_nulls()
+            .unique()
+        )
+
+        coords_rad = self._to_radians(self._unique_coords)
+
+        # DBSCAN com métrica Haversine (sklearn exige entrada em radianos)
+        self._dbscan = DBSCAN(
+            eps=self._eps_rad,
+            min_samples=self.min_samples,
+            algorithm="ball_tree",
+            metric="haversine",
+        )
+        self._dbscan.fit(coords_rad)
+        self._coord_labels = self._dbscan.labels_
+
+        self.n_clusters_ = len(set(self._coord_labels)) - (
+            1 if -1 in self._coord_labels else 0
+        )
+        self.n_noise_ = int((self._coord_labels == -1).sum())
+
+        # KNN 1-vizinho como fallback para coordenadas não vistas no treino.
+        # Treinado apenas com pontos que pertencem a algum cluster (não ruído).
+        valid_mask = self._coord_labels != -1
+        if valid_mask.sum() > 0:
+            self._knn = KNeighborsClassifier(
+                n_neighbors=1,
+                algorithm="ball_tree",
+                metric="haversine",
+            )
+            self._knn.fit(
+                coords_rad[valid_mask],
+                self._coord_labels[valid_mask].tolist(),
+            )
+
+        self.is_fitted = True
+        print(
+            f"✓ DBSCAN concluído: {self.n_clusters_} zonas quentes | "
+            f"{self.n_noise_} pontos isolados → absorvidos via KNN "
+            f"(raio={self.radius_km} km, min_samples={self.min_samples})"
+        )
+        return self
+
+    # ── Predição ─────────────────────────────────────────────────────────────
+
+    def predict(self, df: pl.DataFrame) -> pl.DataFrame:
+        """
+        Atribui grupo regional a cada linha do DataFrame.
+
+        Estratégia por tipo de ponto:
+        • Coordenada de cluster (DBSCAN ≥ 0)  → rótulo direto do DBSCAN.
+        • Ponto de ruído (DBSCAN label -1)    → KNN 1-vizinho ao cluster mais próximo.
+        • Coordenada nova (não vista)         → KNN 1-vizinho ao cluster mais próximo.
+        • Lat/lon nulo                        → recebe null.
+
+        Nenhum ponto recebe rótulo de ruído — todos são absorvidos pela zona
+        geograficamente mais próxima via KNN.
+
+        Args:
+            df: DataFrame com colunas 'latitude' e 'longitude'.
+
+        Returns:
+            DataFrame original com nova coluna 'grupo_regional' (Utf8).
+
+        Raises:
+            ValueError: Se o modelo não foi treinado.
         """
         if not self.is_fitted:
-            print("⚠️  Modelo não foi treinado ainda")
-            return
-        
-        df_centers = self.get_cluster_centers()
-        df_centers.write_csv(output_path)
-        print(f"✓ Informações dos centróides salvas em: {output_path}")
+            raise ValueError("Modelo não treinado. Execute fit() primeiro.")
+
+        self._validate_geo_columns(df)
+
+        # Monta mapa (lat, lon) → rótulo apenas para pontos de cluster (label ≥ 0).
+        # Pontos de ruído (label == -1) são excluídos intencionalmente para que
+        # sejam enfileirados no KNN junto com coordenadas novas.
+        train_lats = self._unique_coords["latitude"].to_list()
+        train_lons = self._unique_coords["longitude"].to_list()
+        coord_map: dict[tuple, int] = {
+            (lat, lon): label
+            for (lat, lon), label in zip(
+                zip(train_lats, train_lons), self._coord_labels
+            )
+            if label != -1
+        }
+
+        labels: list[Optional[int]] = []
+        knn_idxs: list[int] = []
+        knn_coords: list[tuple[float, float]] = []
+
+        for i, (lat, lon) in enumerate(
+            zip(df["latitude"].to_list(), df["longitude"].to_list())
+        ):
+            if lat is None or lon is None:
+                labels.append(None)
+            elif (lat, lon) in coord_map:
+                labels.append(coord_map[(lat, lon)])
+            else:
+                # Ponto de ruído ou coordenada nova → resolvido via KNN
+                labels.append(None)  # placeholder
+                knn_idxs.append(i)
+                knn_coords.append((lat, lon))
+
+        # Resolve ruído + pontos novos via KNN Haversine
+        if knn_idxs:
+            if self._knn is not None:
+                coords_rad = np.radians(np.array(knn_coords))
+                knn_labels = self._knn.predict(coords_rad)
+                for idx, label in zip(knn_idxs, knn_labels):
+                    labels[idx] = int(label)
+            else:
+                # Caso extremo: todos os pontos do treino eram ruído
+                for idx in knn_idxs:
+                    labels[idx] = None
+
+        return df.with_columns(
+            pl.Series("grupo_regional", labels, dtype=pl.Int32)
+        )
+
+    # ── Utilitários ─────────────────────────────────────────────────────────
+
+    def get_cluster_summary(self) -> Optional[pl.DataFrame]:
+        """
+        Retorna um resumo estatístico por zona quente.
+
+        Para cada cluster encontrado, calcula o centróide geográfico
+        (média de lat/lon) e o número de pontos únicos pertencentes.
+
+        Returns:
+            pl.DataFrame com colunas:
+                - grupo_regional  : rótulo do cluster
+                - centroide_lat   : latitude média do cluster
+                - centroide_lon   : longitude média do cluster
+                - n_pontos_unicos : quantidade de coordenadas únicas no cluster
+            None se o modelo não foi treinado.
+        """
+        if not self.is_fitted:
+            return None
+
+        lats = self._unique_coords["latitude"].to_list()
+        lons = self._unique_coords["longitude"].to_list()
+
+        groups: dict[str, list[tuple[float, float]]] = {}
+        for (lat, lon), label in zip(zip(lats, lons), self._coord_labels):
+            key = int(label) if label != -1 else None
+            if key is not None:
+                groups.setdefault(key, []).append((lat, lon))
+
+        rows = [
+            {
+                "grupo_regional": k,
+                "centroide_lat": float(np.mean([p[0] for p in pts])),
+                "centroide_lon": float(np.mean([p[1] for p in pts])),
+                "n_pontos_unicos": len(pts),
+            }
+            for k, pts in sorted(groups.items())
+        ]
+        return pl.DataFrame(rows).with_columns(pl.col("grupo_regional").cast(pl.Int32))
 
 
-def enrich_with_regional_groups(df: pl.DataFrame) -> pl.DataFrame:
-    """
-    Função helper para enriquecer DataFrame com grupos regionais.
-    
-    Args:
-        df (pl.DataFrame): DataFrame com colunas 'latitude' e 'longitude'
-    
-    Returns:
-        pl.DataFrame: DataFrame enriquecido com coluna 'grupo_regional'
-    
-    Example:
-        >>> df_enriched = enrich_with_regional_groups(df_original)
-    """
-    classifier = RegionalGroupClassifier()
-    return classifier.fit_predict(df)
+# ── Funções helper ──────────────────────────────────────────────────────────────
 
-
-def get_regional_groups_from_csv(
-    csv_path: str,
-    output_path: Optional[str] = None
+def enrich_with_regional_groups(
+    df: pl.DataFrame,
+    radius_km: float = 5.0,
+    min_samples: int = 2,
 ) -> pl.DataFrame:
     """
-    Carrega CSV, aplica classificação regional e retorna apenas coluna de grupos.
-    
-    Esta função otimizada carrega apenas as colunas necessárias (latitude, longitude)
-    e retorna apenas a coluna 'grupo_regional' para integração posterior.
-    
+    Enriquece o DataFrame com a coluna 'grupo_regional' via DBSCAN + Haversine.
+
+    Função de conveniência que instancia RegionalGroupClassifier e executa
+    fit_predict em uma única chamada.
+
     Args:
-        csv_path (str): Caminho do arquivo CSV de entrada
-        output_path (str, optional): Se fornecido, salva resultado em CSV
-    
+        df          : DataFrame com colunas 'latitude' e 'longitude'.
+        radius_km   : Raio de vizinhança em km (padrão: 5 km).
+        min_samples : Mínimo de pontos para formar um cluster (padrão: 2).
+
     Returns:
-        pl.DataFrame: DataFrame com apenas a coluna 'grupo_regional'
-    
+        DataFrame original com coluna 'grupo_regional' adicionada.
+
     Example:
-        >>> df_grupos = get_regional_groups_from_csv('consumption_consolidated.csv')
-        >>> # Integrar no DataFrame principal
-        >>> df_final = df_original.with_columns(df_grupos)
+        >>> df_enriched = enrich_with_regional_groups(df, radius_km=5, min_samples=2)
     """
-    print(f"⏳ Carregando coordenadas de {csv_path}...")
-    
-    # Carrega apenas colunas necessárias (otimização de memória)
-    df_coords = pl.read_csv(csv_path, columns=['latitude', 'longitude'])
-    
-    print(f"✓ {len(df_coords)} registros carregados")
-    
-    # Aplica classificação
-    classifier = RegionalGroupClassifier()
-    df_classified = classifier.fit_predict(df_coords)
-    
-    # Retorna apenas coluna de grupos
-    df_result = df_classified.select('grupo_regional')
-    
-    # Salva se solicitado
-    if output_path:
-        df_result.write_csv(output_path)
-        print(f"✓ Grupos regionais salvos em: {output_path}")
-    
-    return df_result
-
-
-def main():
-    """Função de exemplo/teste do módulo"""
-    print("=" * 80)
-    print("CLASSIFICAÇÃO DE GRUPOS REGIONAIS - K-MEANS")
-    print("=" * 80)
-    
-    # Exemplo com dados simulados
-    print("\n📊 Exemplo 1: Dados simulados")
-    print("-" * 80)
-    
-    # Cria dados de exemplo
-    np.random.seed(42)
-    df_example = pl.DataFrame({
-        'unit_id': [f'UNIT_{i}' for i in range(100)],
-        'latitude': np.random.uniform(-30, -10, 100),  # Sul/Sudeste do Brasil
-        'longitude': np.random.uniform(-55, -35, 100),
-        'consumo_kwh': np.random.uniform(10, 100, 100)
-    })
-    
-    print(f"Dataset exemplo: {len(df_example)} registros")
-    print(df_example.head(5))
-    
-    # Aplica classificação
-    print("\n⏳ Aplicando classificação regional...")
-    df_classified = enrich_with_regional_groups(df_example)
-    
-    print("\n✓ Resultado (primeiras 5 linhas):")
-    print(df_classified.head(5))
-    
-    print("\n📈 Distribuição por grupo regional:")
-    df_dist = df_classified.group_by('grupo_regional').agg([
-        pl.len().alias('quantidade'),
-        pl.mean('latitude').alias('lat_media'),
-        pl.mean('longitude').alias('lon_media'),
-        pl.mean('consumo_kwh').alias('consumo_medio')
-    ]).sort('grupo_regional')
-    print(df_dist)
-    
-    # Mostra centróides
-    classifier = RegionalGroupClassifier()
-    classifier.fit(df_example)
-    df_centers = classifier.get_cluster_centers()
-    print("\n🎯 Centróides dos clusters:")
-    print(df_centers)
-    
-    print("\n" + "=" * 80)
-    print("✓ Exemplo concluído com sucesso!")
-    print("=" * 80)
-
+    clf = RegionalGroupClassifier(radius_km=radius_km, min_samples=min_samples)
+    return clf.fit_predict(df)
 
 if __name__ == "__main__":
-    main()
+    # Exemplo de uso
+    import polars as pl
+
+    # Carrega dados de exemplo (substitua pelo caminho real do CSV)
+    df = pl.read_csv(r"use_case\files\consumption_consolidated.csv")
+
+    # Enriquece com grupos regionais
+    df_enriched = enrich_with_regional_groups(df, radius_km=5, min_samples=2)
+    print(df_enriched.select(["grupo_regional"]).unique())
+    print(df_enriched.select(["latitude", "longitude", "grupo_regional"]).head())
