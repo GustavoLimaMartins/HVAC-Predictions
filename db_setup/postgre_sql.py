@@ -159,6 +159,31 @@ class SyntaxPostgreeSQL:
         pass
     
     @staticmethod
+    def get_unit_ids_by_reference_ids(reference_ids: list[int]) -> str:
+        """
+        Retorna query SQL para obter os IDs internos (PostgreSQL) de unidades
+        a partir de seus reference_ids (UNIT_ID do MySQL).
+
+        Args:
+            reference_ids (list[int]): Lista de reference_ids para consulta.
+
+        Returns:
+            str: Query SQL retornando pares (id, reference_id) da tabela units.
+
+        Raises:
+            ValueError: Se reference_ids estiver vazio.
+        """
+        if not reference_ids:
+            raise ValueError("reference_ids não pode ser uma lista vazia.")
+
+        reference_ids_str = ', '.join(map(str, reference_ids))
+        return f'''
+        SELECT id, reference_id
+        FROM units
+        WHERE reference_id IN ({reference_ids_str});
+        '''
+
+    @staticmethod
     def get_devices_by_units(units: list[int]) -> str:
         """
         Retorna query SQL para obter dispositivos únicos por unidade usando a tabela device_disponiblity_hist.

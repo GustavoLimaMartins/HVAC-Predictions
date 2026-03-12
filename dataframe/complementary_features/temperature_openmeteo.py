@@ -347,6 +347,12 @@ class WeatherEnricher:
                     # Garante conformidade do esquema
                     df_weather = self._ensure_schema_compliance(df_weather)
                     weather_data_list.append(df_weather)
+
+                # Checkpoint: salva cache a cada 1000 requisições concluídas
+                if new_requests % 1000 == 0:
+                    print(f"\n  💾 Checkpoint: {new_requests} requisições concluídas. Salvando cache...")
+                    self._save_cache_to_csv()
+
             print(f"\n  ✓ Novas requisições concluídas: {new_requests}")
         
         # Agora coleta dados do cache para todas as combinações únicas (incluindo as que já existiam)

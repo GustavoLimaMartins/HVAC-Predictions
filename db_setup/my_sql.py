@@ -148,6 +148,135 @@ class SyntaxMySQL:
             u.CITY_ID ASC;
         """
 
+    @staticmethod
+    def get_devices_by_units_by_unit_names(unit_names: list[str]) -> str:
+        """
+        Retorna query SQL para obter dispositivos (DUT/DAC) associados a unidades pelo nome.
+
+        Cobre todos os caminhos de associação possíveis:
+            DUT: via automação de máquina | via monitoramento de ambiente
+            DAC: via condensadora | via evaporadora | via trocador de calor | via automação de máquina
+
+        Args:
+            unit_names (list[str]): Lista de nomes de unidades (UNIT_NAME) para filtrar.
+
+        Returns:
+            str: Query MySQL retornando pares únicos (DEVICE_CODE, UNIT_ID).
+        """
+        return f"""
+        -- Query geral para associar device_code de DUT e DAC com unit_id
+        -- Cobre todos os caminhos de associação possíveis:
+        --   DUT : via automação de máquina  |  via monitoramento de ambiente
+        --   DAC : via condensadora  |  via evaporadora  |  via trocador de calor  |  via automação de máquina
+        -- Database: dashprod
+
+        WITH dut_via_automation AS (
+            -- DUTs vinculados a unidades através da automação de uma máquina HVAC
+            SELECT
+                'DUT'        AS device_type,
+                'automation' AS association_path,
+                d.DEVICE_CODE,
+                m.UNIT_ID
+            FROM DEVICES d
+            INNER JOIN DUTS_DEVICES     dut_dev  ON d.ID            = dut_dev.DEVICE_ID
+            INNER JOIN DUTS_AUTOMATION  dut_auto ON dut_dev.ID      = dut_auto.DUT_DEVICE_ID
+            INNER JOIN MACHINES         m        ON dut_auto.MACHINE_ID = m.ID
+            WHERE m.UNIT_ID IS NOT NULL
+        ),
+        dut_via_monitoring AS (
+            -- DUTs vinculados a unidades através do monitoramento de um ambiente (ENVIRONMENTS)
+            SELECT
+                'DUT'        AS device_type,
+                'monitoring' AS association_path,
+                d.DEVICE_CODE,
+                e.UNIT_ID
+            FROM DEVICES d
+            INNER JOIN DUTS_DEVICES    dut_dev ON d.ID              = dut_dev.DEVICE_ID
+            INNER JOIN DUTS_MONITORING dut_mon ON dut_dev.ID        = dut_mon.DUT_DEVICE_ID
+            INNER JOIN ENVIRONMENTS    e       ON dut_mon.ENVIRONMENT_ID = e.ID
+            WHERE e.UNIT_ID IS NOT NULL
+        ),
+        dac_via_condenser AS (
+            -- DACs vinculados a unidades através de uma condensadora
+            SELECT
+                'DAC'        AS device_type,
+                'condenser'  AS association_path,
+                d.DEVICE_CODE,
+                m.UNIT_ID
+            FROM DEVICES d
+            INNER JOIN DACS_DEVICES    dac_dev  ON d.ID               = dac_dev.DEVICE_ID
+            INNER JOIN DACS_CONDENSERS dac_cond ON dac_dev.ID         = dac_cond.DAC_DEVICE_ID
+            INNER JOIN CONDENSERS      c        ON dac_cond.CONDENSER_ID = c.ID
+            INNER JOIN MACHINES        m        ON c.MACHINE_ID       = m.ID
+            WHERE m.UNIT_ID IS NOT NULL
+        ),
+        dac_via_evaporator AS (
+            -- DACs vinculados a unidades através de uma evaporadora
+            SELECT
+                'DAC'        AS device_type,
+                'evaporator' AS association_path,
+                d.DEVICE_CODE,
+                m.UNIT_ID
+            FROM DEVICES d
+            INNER JOIN DACS_DEVICES     dac_dev  ON d.ID                  = dac_dev.DEVICE_ID
+            INNER JOIN DACS_EVAPORATORS dac_evap ON dac_dev.ID            = dac_evap.DAC_DEVICE_ID
+            INNER JOIN EVAPORATORS      evap     ON dac_evap.EVAPORATOR_ID = evap.ID
+            INNER JOIN MACHINES         m        ON evap.MACHINE_ID       = m.ID
+            WHERE m.UNIT_ID IS NOT NULL
+        ),
+        dac_via_automation AS (
+            -- DACs vinculados a unidades através da automação direta de uma máquina HVAC
+            SELECT
+                'DAC'        AS device_type,
+                'automation' AS association_path,
+                d.DEVICE_CODE,
+                m.UNIT_ID
+            FROM DEVICES d
+            INNER JOIN DACS_DEVICES     dac_dev  ON d.ID                = dac_dev.DEVICE_ID
+            INNER JOIN DACS_AUTOMATIONS dac_auto ON dac_dev.ID          = dac_auto.DAC_DEVICE_ID
+            INNER JOIN MACHINES         m        ON dac_auto.MACHINE_ID = m.ID
+            WHERE m.UNIT_ID IS NOT NULL
+        ),
+        dac_via_heat_exchanger AS (
+            -- DACs vinculados a unidades através de um trocador de calor (asset heat exchanger)
+            SELECT
+                'DAC'            AS device_type,
+                'heat_exchanger' AS association_path,
+                d.DEVICE_CODE,
+                m.UNIT_ID
+            FROM DEVICES d
+            INNER JOIN DACS_DEVICES                dac_dev ON d.ID                          = dac_dev.DEVICE_ID
+            INNER JOIN DACS_ASSET_HEAT_EXCHANGERS  dac_ahe ON dac_dev.ID                   = dac_ahe.DAC_DEVICE_ID
+            INNER JOIN ASSET_HEAT_EXCHANGERS       ahe     ON dac_ahe.ASSET_HEAT_EXCHANGER_ID = ahe.ID
+            INNER JOIN MACHINES                    m       ON ahe.MACHINE_ID                = m.ID
+            WHERE m.UNIT_ID IS NOT NULL
+        ),
+        all_associations AS (
+            SELECT * FROM dut_via_automation
+            UNION ALL
+            SELECT * FROM dut_via_monitoring
+            UNION ALL
+            SELECT * FROM dac_via_condenser
+            UNION ALL
+            SELECT * FROM dac_via_evaporator
+            UNION ALL
+            SELECT * FROM dac_via_automation
+            UNION ALL
+            SELECT * FROM dac_via_heat_exchanger
+        )
+        -- Resultado final: par único (device_code, unit_id, unit_name) por tipo de dispositivo
+        SELECT DISTINCT
+            a.DEVICE_CODE,
+            a.UNIT_ID,
+            u.UNIT_NAME
+        FROM all_associations a
+        LEFT JOIN CLUNITS u ON a.UNIT_ID = u.UNIT_ID
+        WHERE u.UNIT_NAME IN ({','.join([f"'{name}'" for name in unit_names])})
+        ORDER BY
+            a.DEVICE_CODE,
+            a.UNIT_ID;
+    """
+
 
 def query_mysql_by_bigquery():
     """

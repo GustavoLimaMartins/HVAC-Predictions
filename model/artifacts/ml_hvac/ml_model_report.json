@@ -1,0 +1,551 @@
+{
+  "timestamp": "2026-03-11T19:27:21",
+  "n_segments": 9,
+  "consolidated": {
+    "n_train": 151047,
+    "n_test": 37768,
+    "MAE": 0.396412,
+    "RMSE": 0.511442,
+    "MAPE": 18.240275,
+    "WMAPE": 17.177868,
+    "Acuracia": 81.759725
+  },
+  "segmented": {
+    "AR CONDICIONADO DE JANELA (ACJ)": {
+      "best_model": "XGBRegressor",
+      "n_train": 1409,
+      "n_test": 353,
+      "n_features": 22,
+      "feature_columns": [
+        "grupo_regional",
+        "Temperatura_C",
+        "Temperatura_Percebida_C",
+        "Umidade_Relativa_%",
+        "Precipitacao_mm",
+        "Velocidade_Vento_kmh",
+        "Pressao_Superficial_hPa",
+        "is_dac",
+        "is_dut",
+        "trimestre",
+        "is_feriado",
+        "is_vespera_feriado",
+        "is_dia_util",
+        "hora_target_enc",
+        "mes_target_enc",
+        "tipo_maquina_AR CONDICIONADO DE JANELA (ACJ)",
+        "estacao_inverno",
+        "estacao_outono",
+        "periodo_dia_Madrugada",
+        "periodo_dia_Manh\u00e3",
+        "periodo_dia_Noite",
+        "periodo_dia_Tarde"
+      ],
+      "best_params": {
+        "subsample": 0.8,
+        "reg_lambda": 0.5,
+        "reg_alpha": 0.0,
+        "n_estimators": 300,
+        "min_child_weight": 1,
+        "max_depth": 7,
+        "learning_rate": 0.1,
+        "gamma": 0.0,
+        "colsample_bytree": 1.0
+      },
+      "models": {
+        "XGBRegressor": {
+          "MAE": 0.171072,
+          "RMSE": 0.240742,
+          "R2": 0.7012,
+          "MAPE": 17.316308,
+          "WMAPE": 14.613802,
+          "Acuracia": 82.683692
+        },
+        "LGBMRegressor": {
+          "MAE": 0.18738,
+          "RMSE": 0.256133,
+          "R2": 0.661775,
+          "MAPE": 18.881133,
+          "WMAPE": 16.006912,
+          "Acuracia": 81.118867
+        }
+      }
+    },
+    "SPLIT CASSETE": {
+      "best_model": "LGBMRegressor",
+      "n_train": 10872,
+      "n_test": 2719,
+      "n_features": 23,
+      "feature_columns": [
+        "grupo_regional",
+        "Temperatura_C",
+        "Temperatura_Percebida_C",
+        "Umidade_Relativa_%",
+        "Precipitacao_mm",
+        "Velocidade_Vento_kmh",
+        "Pressao_Superficial_hPa",
+        "is_dac",
+        "is_dut",
+        "trimestre",
+        "is_feriado",
+        "is_vespera_feriado",
+        "is_dia_util",
+        "hora_target_enc",
+        "mes_target_enc",
+        "tipo_maquina_SPLIT CASSETE",
+        "estacao_inverno",
+        "estacao_outono",
+        "estacao_verao",
+        "periodo_dia_Madrugada",
+        "periodo_dia_Manh\u00e3",
+        "periodo_dia_Noite",
+        "periodo_dia_Tarde"
+      ],
+      "best_params": {
+        "subsample": 1.0,
+        "reg_lambda": 0.5,
+        "reg_alpha": 0.5,
+        "num_leaves": 127,
+        "n_estimators": 300,
+        "min_child_samples": 20,
+        "max_depth": 30,
+        "learning_rate": 0.05,
+        "colsample_bytree": 0.9
+      },
+      "models": {
+        "LGBMRegressor": {
+          "MAE": 0.449988,
+          "RMSE": 0.592199,
+          "R2": 0.320249,
+          "MAPE": 17.784526,
+          "WMAPE": 15.660451,
+          "Acuracia": 82.215474
+        },
+        "XGBRegressor": {
+          "MAE": 0.453003,
+          "RMSE": 0.579483,
+          "R2": 0.349126,
+          "MAPE": 17.910683,
+          "WMAPE": 15.765374,
+          "Acuracia": 82.089317
+        }
+      }
+    },
+    "SPLIT DUTO": {
+      "best_model": "XGBRegressor",
+      "n_train": 3006,
+      "n_test": 752,
+      "n_features": 23,
+      "feature_columns": [
+        "grupo_regional",
+        "Temperatura_C",
+        "Temperatura_Percebida_C",
+        "Umidade_Relativa_%",
+        "Precipitacao_mm",
+        "Velocidade_Vento_kmh",
+        "Pressao_Superficial_hPa",
+        "is_dac",
+        "is_dut",
+        "trimestre",
+        "is_feriado",
+        "is_vespera_feriado",
+        "is_dia_util",
+        "hora_target_enc",
+        "mes_target_enc",
+        "tipo_maquina_SPLIT DUTO",
+        "estacao_inverno",
+        "estacao_outono",
+        "estacao_verao",
+        "periodo_dia_Madrugada",
+        "periodo_dia_Manh\u00e3",
+        "periodo_dia_Noite",
+        "periodo_dia_Tarde"
+      ],
+      "best_params": {
+        "subsample": 0.9,
+        "reg_lambda": 1.0,
+        "reg_alpha": 0.1,
+        "n_estimators": 300,
+        "min_child_weight": 1,
+        "max_depth": 10,
+        "learning_rate": 0.1,
+        "gamma": 0.5,
+        "colsample_bytree": 1.0
+      },
+      "models": {
+        "XGBRegressor": {
+          "MAE": 0.49635,
+          "RMSE": 0.776512,
+          "R2": 0.563072,
+          "MAPE": 16.093113,
+          "WMAPE": 13.233204,
+          "Acuracia": 83.906887
+        },
+        "LGBMRegressor": {
+          "MAE": 0.544874,
+          "RMSE": 0.813572,
+          "R2": 0.520371,
+          "MAPE": 17.23366,
+          "WMAPE": 14.526919,
+          "Acuracia": 82.76634
+        }
+      }
+    },
+    "SPLIT HI-WALL": {
+      "best_model": "LGBMRegressor",
+      "n_train": 67157,
+      "n_test": 16790,
+      "n_features": 23,
+      "feature_columns": [
+        "grupo_regional",
+        "Temperatura_C",
+        "Temperatura_Percebida_C",
+        "Umidade_Relativa_%",
+        "Precipitacao_mm",
+        "Velocidade_Vento_kmh",
+        "Pressao_Superficial_hPa",
+        "is_dac",
+        "is_dut",
+        "trimestre",
+        "is_feriado",
+        "is_vespera_feriado",
+        "is_dia_util",
+        "hora_target_enc",
+        "mes_target_enc",
+        "tipo_maquina_SPLIT HI-WALL",
+        "estacao_inverno",
+        "estacao_outono",
+        "estacao_verao",
+        "periodo_dia_Madrugada",
+        "periodo_dia_Manh\u00e3",
+        "periodo_dia_Noite",
+        "periodo_dia_Tarde"
+      ],
+      "best_params": {
+        "subsample": 1.0,
+        "reg_lambda": 0.5,
+        "reg_alpha": 0.5,
+        "num_leaves": 127,
+        "n_estimators": 300,
+        "min_child_samples": 20,
+        "max_depth": 30,
+        "learning_rate": 0.05,
+        "colsample_bytree": 0.9
+      },
+      "models": {
+        "LGBMRegressor": {
+          "MAE": 0.202919,
+          "RMSE": 0.260348,
+          "R2": 0.350482,
+          "MAPE": 17.329082,
+          "WMAPE": 16.797566,
+          "Acuracia": 82.670918
+        },
+        "XGBRegressor": {
+          "MAE": 0.205897,
+          "RMSE": 0.262209,
+          "R2": 0.341164,
+          "MAPE": 17.580553,
+          "WMAPE": 17.044046,
+          "Acuracia": 82.419447
+        }
+      }
+    },
+    "SPLIT PISO-TETO": {
+      "best_model": "LGBMRegressor",
+      "n_train": 53525,
+      "n_test": 13382,
+      "n_features": 23,
+      "feature_columns": [
+        "grupo_regional",
+        "Temperatura_C",
+        "Temperatura_Percebida_C",
+        "Umidade_Relativa_%",
+        "Precipitacao_mm",
+        "Velocidade_Vento_kmh",
+        "Pressao_Superficial_hPa",
+        "is_dac",
+        "is_dut",
+        "trimestre",
+        "is_feriado",
+        "is_vespera_feriado",
+        "is_dia_util",
+        "hora_target_enc",
+        "mes_target_enc",
+        "tipo_maquina_SPLIT PISO-TETO",
+        "estacao_inverno",
+        "estacao_outono",
+        "estacao_verao",
+        "periodo_dia_Madrugada",
+        "periodo_dia_Manh\u00e3",
+        "periodo_dia_Noite",
+        "periodo_dia_Tarde"
+      ],
+      "best_params": {
+        "subsample": 1.0,
+        "reg_lambda": 0.5,
+        "reg_alpha": 0.5,
+        "num_leaves": 127,
+        "n_estimators": 300,
+        "min_child_samples": 20,
+        "max_depth": 30,
+        "learning_rate": 0.05,
+        "colsample_bytree": 0.9
+      },
+      "models": {
+        "LGBMRegressor": {
+          "MAE": 0.536117,
+          "RMSE": 0.664658,
+          "R2": 0.218668,
+          "MAPE": 21.739944,
+          "WMAPE": 20.403249,
+          "Acuracia": 78.260056
+        },
+        "XGBRegressor": {
+          "MAE": 0.54076,
+          "RMSE": 0.668973,
+          "R2": 0.208491,
+          "MAPE": 21.928899,
+          "WMAPE": 20.579946,
+          "Acuracia": 78.071101
+        }
+      }
+    },
+    "SPLIT\u00c3O": {
+      "best_model": "LGBMRegressor",
+      "n_train": 12507,
+      "n_test": 3127,
+      "n_features": 23,
+      "feature_columns": [
+        "grupo_regional",
+        "Temperatura_C",
+        "Temperatura_Percebida_C",
+        "Umidade_Relativa_%",
+        "Precipitacao_mm",
+        "Velocidade_Vento_kmh",
+        "Pressao_Superficial_hPa",
+        "is_dac",
+        "is_dut",
+        "trimestre",
+        "is_feriado",
+        "is_vespera_feriado",
+        "is_dia_util",
+        "hora_target_enc",
+        "mes_target_enc",
+        "tipo_maquina_SPLIT\u00c3O",
+        "estacao_inverno",
+        "estacao_outono",
+        "estacao_verao",
+        "periodo_dia_Madrugada",
+        "periodo_dia_Manh\u00e3",
+        "periodo_dia_Noite",
+        "periodo_dia_Tarde"
+      ],
+      "best_params": {
+        "subsample": 1.0,
+        "reg_lambda": 0.0,
+        "reg_alpha": 0.1,
+        "num_leaves": 63,
+        "n_estimators": 700,
+        "min_child_samples": 50,
+        "max_depth": 10,
+        "learning_rate": 0.01,
+        "colsample_bytree": 0.9
+      },
+      "models": {
+        "LGBMRegressor": {
+          "MAE": 0.708766,
+          "RMSE": 0.918111,
+          "R2": 0.338614,
+          "MAPE": 10.285435,
+          "WMAPE": 10.356663,
+          "Acuracia": 89.714565
+        },
+        "XGBRegressor": {
+          "MAE": 0.718976,
+          "RMSE": 0.942954,
+          "R2": 0.302337,
+          "MAPE": 10.441632,
+          "WMAPE": 10.505856,
+          "Acuracia": 89.558368
+        }
+      }
+    },
+    "SPLIT\u00c3O INVERTER": {
+      "best_model": "XGBRegressor",
+      "n_train": 1677,
+      "n_test": 420,
+      "n_features": 22,
+      "feature_columns": [
+        "grupo_regional",
+        "Temperatura_C",
+        "Temperatura_Percebida_C",
+        "Umidade_Relativa_%",
+        "Precipitacao_mm",
+        "Velocidade_Vento_kmh",
+        "Pressao_Superficial_hPa",
+        "is_dac",
+        "is_dut",
+        "trimestre",
+        "is_feriado",
+        "is_vespera_feriado",
+        "is_dia_util",
+        "hora_target_enc",
+        "mes_target_enc",
+        "tipo_maquina_SPLIT\u00c3O INVERTER",
+        "estacao_inverno",
+        "estacao_outono",
+        "periodo_dia_Madrugada",
+        "periodo_dia_Manh\u00e3",
+        "periodo_dia_Noite",
+        "periodo_dia_Tarde"
+      ],
+      "best_params": {
+        "subsample": 1.0,
+        "reg_lambda": 2.0,
+        "reg_alpha": 0.5,
+        "n_estimators": 500,
+        "min_child_weight": 5,
+        "max_depth": 3,
+        "learning_rate": 0.1,
+        "gamma": 0.5,
+        "colsample_bytree": 0.9
+      },
+      "models": {
+        "XGBRegressor": {
+          "MAE": 1.05966,
+          "RMSE": 1.919547,
+          "R2": 0.983985,
+          "MAPE": 17.162298,
+          "WMAPE": 6.100555,
+          "Acuracia": 82.837702
+        },
+        "LGBMRegressor": {
+          "MAE": 1.058188,
+          "RMSE": 1.811061,
+          "R2": 0.985744,
+          "MAPE": 17.208621,
+          "WMAPE": 6.092078,
+          "Acuracia": 82.791379
+        }
+      }
+    },
+    "SPLIT\u00c3O ROOFTOP": {
+      "best_model": "LGBMRegressor",
+      "n_train": 204,
+      "n_test": 52,
+      "n_features": 21,
+      "feature_columns": [
+        "grupo_regional",
+        "Temperatura_C",
+        "Temperatura_Percebida_C",
+        "Umidade_Relativa_%",
+        "Precipitacao_mm",
+        "Velocidade_Vento_kmh",
+        "Pressao_Superficial_hPa",
+        "is_dac",
+        "is_dut",
+        "trimestre",
+        "is_feriado",
+        "is_vespera_feriado",
+        "is_dia_util",
+        "hora_target_enc",
+        "mes_target_enc",
+        "tipo_maquina_SPLIT\u00c3O ROOFTOP",
+        "estacao_inverno",
+        "estacao_outono",
+        "periodo_dia_Manh\u00e3",
+        "periodo_dia_Noite",
+        "periodo_dia_Tarde"
+      ],
+      "best_params": {
+        "subsample": 0.9,
+        "reg_lambda": 0.5,
+        "reg_alpha": 0.5,
+        "num_leaves": 31,
+        "n_estimators": 700,
+        "min_child_samples": 50,
+        "max_depth": 10,
+        "learning_rate": 0.1,
+        "colsample_bytree": 0.7
+      },
+      "models": {
+        "LGBMRegressor": {
+          "MAE": 0.609718,
+          "RMSE": 0.849026,
+          "R2": 0.010792,
+          "MAPE": 7.835925,
+          "WMAPE": 7.614515,
+          "Acuracia": 92.164075
+        },
+        "XGBRegressor": {
+          "MAE": 0.62095,
+          "RMSE": 0.896852,
+          "R2": -0.103792,
+          "MAPE": 8.128326,
+          "WMAPE": 7.754789,
+          "Acuracia": 91.871674
+        }
+      }
+    },
+    "SPLIT\u00c3O SELF CONTAINED": {
+      "best_model": "LGBMRegressor",
+      "n_train": 690,
+      "n_test": 173,
+      "n_features": 23,
+      "feature_columns": [
+        "grupo_regional",
+        "Temperatura_C",
+        "Temperatura_Percebida_C",
+        "Umidade_Relativa_%",
+        "Precipitacao_mm",
+        "Velocidade_Vento_kmh",
+        "Pressao_Superficial_hPa",
+        "is_dac",
+        "is_dut",
+        "trimestre",
+        "is_feriado",
+        "is_vespera_feriado",
+        "is_dia_util",
+        "hora_target_enc",
+        "mes_target_enc",
+        "tipo_maquina_SPLIT\u00c3O SELF CONTAINED",
+        "estacao_inverno",
+        "estacao_outono",
+        "estacao_verao",
+        "periodo_dia_Madrugada",
+        "periodo_dia_Manh\u00e3",
+        "periodo_dia_Noite",
+        "periodo_dia_Tarde"
+      ],
+      "best_params": {
+        "subsample": 0.9,
+        "reg_lambda": 0.0,
+        "reg_alpha": 0.1,
+        "num_leaves": 31,
+        "n_estimators": 300,
+        "min_child_samples": 100,
+        "max_depth": 30,
+        "learning_rate": 0.1,
+        "colsample_bytree": 1.0
+      },
+      "models": {
+        "LGBMRegressor": {
+          "MAE": 0.23191,
+          "RMSE": 0.289338,
+          "R2": 0.172355,
+          "MAPE": 3.875723,
+          "WMAPE": 3.884536,
+          "Acuracia": 96.124277
+        },
+        "XGBRegressor": {
+          "MAE": 0.233993,
+          "RMSE": 0.288013,
+          "R2": 0.179915,
+          "MAPE": 3.916524,
+          "WMAPE": 3.919433,
+          "Acuracia": 96.083476
+        }
+      }
+    }
+  }
+}

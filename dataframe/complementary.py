@@ -13,7 +13,7 @@ import polars as pl
 
 from .complementary_features.year_stations import enrich_with_seasons
 from .complementary_features.temperature_openmeteo import WeatherEnricher
-from .complementary_features.regional_group.model import enrich_with_regional_groups
+from .complementary_features.regional_group.model import RegionalGroupClassifier
 
 
 def enrich_dataframe_with_all_features(df: pl.DataFrame) -> pl.DataFrame:
@@ -49,7 +49,7 @@ def enrich_dataframe_with_all_features(df: pl.DataFrame) -> pl.DataFrame:
     
     # 2. Grupos regionais DBSCAN + Haversine (latitude, longitude)
     print("\n[2/3] Classificando grupos regionais...")
-    df_groups = enrich_with_regional_groups(df.select(['latitude', 'longitude']), radius_km=5, min_samples=2).select('grupo_regional')
+    df_groups = RegionalGroupClassifier(radius_km=40, min_samples=2).fit_predict(df.select(['latitude', 'longitude'])).select('grupo_regional')
     print(f"✓ {len(df_groups)} registros processados")
     
     # 3. Dados climáticos OpenMeteo (data, hora, latitude, longitude)
@@ -78,7 +78,7 @@ def get_season_only(df: pl.DataFrame) -> pl.DataFrame:
 
 def get_regional_groups_only(df: pl.DataFrame) -> pl.DataFrame:
     """Retorna apenas coluna de grupos regionais."""
-    return enrich_with_regional_groups(df.select(['latitude', 'longitude'])).select('grupo_regional')
+    return RegionalGroupClassifier(radius_km=5, min_samples=2).fit_predict(df.select(['latitude', 'longitude'])).select('grupo_regional')
 
 
 def get_weather_only(df: pl.DataFrame) -> pl.DataFrame:

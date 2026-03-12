@@ -28,6 +28,8 @@ from typing import Optional
 
 import numpy as np
 import polars as pl
+import matplotlib.pyplot as plt
+import matplotlib.cm as cm
 from sklearn.cluster import DBSCAN
 from sklearn.neighbors import KNeighborsClassifier
 
@@ -111,22 +113,24 @@ class RegionalGroupClassifier(UnsupervisedGeoModel):
     min_samples : Mínimo de pontos (inclusive o próprio) para que uma
                   região seja considerada um cluster e não ruído.
                   Valor padrão 4 → "pelo menos 3 vizinhos no raio".
-    noise_label : Rótulo atribuído a pontos fora de qualquer zona quente.
 
     Atributos pós-treino
     --------------------
-    is_fitted   : bool — True após fit().
-    n_clusters_ : int  — Número de zonas quentes encontradas (ruído excluído).
-    n_noise_    : int  — Pontos classificados como ruído (label DBSCAN = -1).
+    is_fitted      : bool — True após fit().
+    n_clusters_    : int  — Número de zonas multi-ponto encontradas.
+    n_noise_       : int  — Pontos isolados (sem vizinhos suficientes no raio).
+    n_total_groups_: int  — Total de grupos = n_clusters_ + n_noise_.
 
     Como funciona internamente
     --------------------------
     1. Extrai combinações únicas de (latitude, longitude) sem nulos.
     2. Converte para radianos (requisito do sklearn com metric='haversine').
     3. DBSCAN agrupa pontos dentro de `radius_km` com ≥ `min_samples` vizinhos.
-    4. Mapeia cada coordenada única ao seu rótulo de cluster.
-    5. Para predição de pontos novos (não vistos no treino), um KNN 1-vizinho
-       com a mesma métrica Haversine é usado como fallback.
+    4. Cada ponto isolado (label DBSCAN = -1) recebe um grupo único próprio,
+       preservando a fidelidade regional climática de cada localização.
+    5. Para coordenadas novas (não vistas no treino), um KNN 1-vizinho é usado
+       como fallback, buscando o ponto treinado geograficamente mais próximo
+       (seja cluster ou grupo isolado).
 
     Example
     -------
@@ -139,13 +143,11 @@ class RegionalGroupClassifier(UnsupervisedGeoModel):
         self,
         radius_km: float = 10.0,
         min_samples: int = 4,
-        noise_label: str = "ruido",
     ) -> None:
         super().__init__()
 
         self.radius_km = radius_km
         self.min_samples = min_samples
-        self.noise_label = noise_label
 
         # eps convertido para radianos: distância / raio médio da Terra
         self._eps_rad: float = radius_km / EARTH_RADIUS_KM
@@ -157,6 +159,7 @@ class RegionalGroupClassifier(UnsupervisedGeoModel):
 
         self.n_clusters_: int = 0
         self.n_noise_: int = 0
+        self.n_total_groups_: int = 0
 
     # ── Treino ──────────────────────────────────────────────────────────────
 
@@ -177,11 +180,12 @@ class RegionalGroupClassifier(UnsupervisedGeoModel):
         """
         self._validate_geo_columns(df)
 
-        # Extrai coordenadas únicas válidas
+        # Extrai coordenadas únicas válidas (ordenadas para determinismo)
         self._unique_coords = (
             df.select(["latitude", "longitude"])
             .drop_nulls()
             .unique()
+            .sort(["latitude", "longitude"])
         )
 
         coords_rad = self._to_radians(self._unique_coords)
@@ -194,31 +198,35 @@ class RegionalGroupClassifier(UnsupervisedGeoModel):
             metric="haversine",
         )
         self._dbscan.fit(coords_rad)
-        self._coord_labels = self._dbscan.labels_
+        self._coord_labels = self._dbscan.labels_.copy()
 
         self.n_clusters_ = len(set(self._coord_labels)) - (
             1 if -1 in self._coord_labels else 0
         )
         self.n_noise_ = int((self._coord_labels == -1).sum())
 
-        # KNN 1-vizinho como fallback para coordenadas não vistas no treino.
-        # Treinado apenas com pontos que pertencem a algum cluster (não ruído).
-        valid_mask = self._coord_labels != -1
-        if valid_mask.sum() > 0:
-            self._knn = KNeighborsClassifier(
-                n_neighbors=1,
-                algorithm="ball_tree",
-                metric="haversine",
-            )
-            self._knn.fit(
-                coords_rad[valid_mask],
-                self._coord_labels[valid_mask].tolist(),
-            )
+        # Cada ponto isolado recebe um grupo único próprio, preservando a
+        # fidelidade regional climática de cada localização geográfica.
+        noise_indices = np.where(self._coord_labels == -1)[0]
+        for i, idx in enumerate(noise_indices):
+            self._coord_labels[idx] = self.n_clusters_ + i
+
+        self.n_total_groups_ = self.n_clusters_ + self.n_noise_
+
+        # KNN 1-vizinho treinado sobre TODOS os pontos (clusters + isolados)
+        # como fallback exclusivo para coordenadas não vistas no treino.
+        self._knn = KNeighborsClassifier(
+            n_neighbors=1,
+            algorithm="ball_tree",
+            metric="haversine",
+        )
+        self._knn.fit(coords_rad, self._coord_labels.tolist())
 
         self.is_fitted = True
         print(
-            f"✓ DBSCAN concluído: {self.n_clusters_} zonas quentes | "
-            f"{self.n_noise_} pontos isolados → absorvidos via KNN "
+            f"✓ DBSCAN concluído: {self.n_clusters_} zonas multi-ponto | "
+            f"{self.n_noise_} grupos isolados | "
+            f"{self.n_total_groups_} grupos no total "
             f"(raio={self.radius_km} km, min_samples={self.min_samples})"
         )
         return self
@@ -230,19 +238,19 @@ class RegionalGroupClassifier(UnsupervisedGeoModel):
         Atribui grupo regional a cada linha do DataFrame.
 
         Estratégia por tipo de ponto:
-        • Coordenada de cluster (DBSCAN ≥ 0)  → rótulo direto do DBSCAN.
-        • Ponto de ruído (DBSCAN label -1)    → KNN 1-vizinho ao cluster mais próximo.
-        • Coordenada nova (não vista)         → KNN 1-vizinho ao cluster mais próximo.
-        • Lat/lon nulo                        → recebe null.
+        • Coordenada de cluster (grupo < n_clusters_) → rótulo direto do treino.
+        • Coordenada isolada (grupo ≥ n_clusters_)    → rótulo único atribuído no fit().
+        • Coordenada nova (não vista no treino)       → KNN 1-vizinho mais próximo.
+        • Lat/lon nulo                                → recebe null.
 
-        Nenhum ponto recebe rótulo de ruído — todos são absorvidos pela zona
-        geograficamente mais próxima via KNN.
+        Pontos isolados mantêm seu grupo individual — nenhuma localização
+        é forçada a um cluster geograficamente distante.
 
         Args:
             df: DataFrame com colunas 'latitude' e 'longitude'.
 
         Returns:
-            DataFrame original com nova coluna 'grupo_regional' (Utf8).
+            DataFrame original com nova coluna 'grupo_regional' (Int32).
 
         Raises:
             ValueError: Se o modelo não foi treinado.
@@ -252,17 +260,14 @@ class RegionalGroupClassifier(UnsupervisedGeoModel):
 
         self._validate_geo_columns(df)
 
-        # Monta mapa (lat, lon) → rótulo apenas para pontos de cluster (label ≥ 0).
-        # Pontos de ruído (label == -1) são excluídos intencionalmente para que
-        # sejam enfileirados no KNN junto com coordenadas novas.
+        # Mapa completo: todos os pontos do treino → rótulo (sem label -1).
         train_lats = self._unique_coords["latitude"].to_list()
         train_lons = self._unique_coords["longitude"].to_list()
         coord_map: dict[tuple, int] = {
-            (lat, lon): label
+            (lat, lon): int(label)
             for (lat, lon), label in zip(
                 zip(train_lats, train_lons), self._coord_labels
             )
-            if label != -1
         }
 
         labels: list[Optional[int]] = []
@@ -277,22 +282,17 @@ class RegionalGroupClassifier(UnsupervisedGeoModel):
             elif (lat, lon) in coord_map:
                 labels.append(coord_map[(lat, lon)])
             else:
-                # Ponto de ruído ou coordenada nova → resolvido via KNN
+                # Coordenada nova (não vista no treino) → resolvida via KNN
                 labels.append(None)  # placeholder
                 knn_idxs.append(i)
                 knn_coords.append((lat, lon))
 
-        # Resolve ruído + pontos novos via KNN Haversine
+        # Resolve coordenadas novas via KNN Haversine
         if knn_idxs:
-            if self._knn is not None:
-                coords_rad = np.radians(np.array(knn_coords))
-                knn_labels = self._knn.predict(coords_rad)
-                for idx, label in zip(knn_idxs, knn_labels):
-                    labels[idx] = int(label)
-            else:
-                # Caso extremo: todos os pontos do treino eram ruído
-                for idx in knn_idxs:
-                    labels[idx] = None
+            coords_rad = np.radians(np.array(knn_coords))
+            knn_labels = self._knn.predict(coords_rad)
+            for idx, label in zip(knn_idxs, knn_labels):
+                labels[idx] = int(label)
 
         return df.with_columns(
             pl.Series("grupo_regional", labels, dtype=pl.Int32)
@@ -321,11 +321,9 @@ class RegionalGroupClassifier(UnsupervisedGeoModel):
         lats = self._unique_coords["latitude"].to_list()
         lons = self._unique_coords["longitude"].to_list()
 
-        groups: dict[str, list[tuple[float, float]]] = {}
+        groups: dict[int, list[tuple[float, float]]] = {}
         for (lat, lon), label in zip(zip(lats, lons), self._coord_labels):
-            key = int(label) if label != -1 else None
-            if key is not None:
-                groups.setdefault(key, []).append((lat, lon))
+            groups.setdefault(int(label), []).append((lat, lon))
 
         rows = [
             {
@@ -333,47 +331,105 @@ class RegionalGroupClassifier(UnsupervisedGeoModel):
                 "centroide_lat": float(np.mean([p[0] for p in pts])),
                 "centroide_lon": float(np.mean([p[1] for p in pts])),
                 "n_pontos_unicos": len(pts),
+                "is_isolado": k >= self.n_clusters_,
             }
             for k, pts in sorted(groups.items())
         ]
         return pl.DataFrame(rows).with_columns(pl.col("grupo_regional").cast(pl.Int32))
 
+    def plot_clusters(
+        self,
+        title: str = "Grupos Regionais — DBSCAN + Haversine",
+        figsize: tuple = (12, 8),
+        save_path: str = None,
+    ) -> None:
+        """
+        Plota os clusters geográficos e pontos isolados (ruído pré-KNN).
 
-# ── Funções helper ──────────────────────────────────────────────────────────────
+        Cada cluster recebe uma cor distinta. Pontos classificados como ruído
+        pelo DBSCAN (antes do fallback KNN) são exibidos em cinza com marcador
+        'x' para facilitar a análise do parâmetro radius_km.
+        Centróides de cada cluster são marcados com uma estrela.
 
-def enrich_with_regional_groups(
-    df: pl.DataFrame,
-    radius_km: float = 5.0,
-    min_samples: int = 2,
-) -> pl.DataFrame:
-    """
-    Enriquece o DataFrame com a coluna 'grupo_regional' via DBSCAN + Haversine.
+        Args:
+            title     : Título do gráfico.
+            figsize   : Tamanho da figura (largura, altura) em polegadas.
+            save_path : Se fornecido, salva a figura no caminho especificado
+                        em vez de exibi-la.
 
-    Função de conveniência que instancia RegionalGroupClassifier e executa
-    fit_predict em uma única chamada.
+        Raises:
+            ValueError: Se o modelo não foi treinado.
+        """
+        if not self.is_fitted:
+            raise ValueError("Modelo não treinado. Execute fit() primeiro.")
 
-    Args:
-        df          : DataFrame com colunas 'latitude' e 'longitude'.
-        radius_km   : Raio de vizinhança em km (padrão: 5 km).
-        min_samples : Mínimo de pontos para formar um cluster (padrão: 2).
+        lats = self._unique_coords["latitude"].to_numpy()
+        lons = self._unique_coords["longitude"].to_numpy()
+        labels = self._coord_labels
 
-    Returns:
-        DataFrame original com coluna 'grupo_regional' adicionada.
+        cluster_ids = sorted(k for k in set(labels) if k < self.n_clusters_)
+        isolated_ids = sorted(k for k in set(labels) if k >= self.n_clusters_)
 
-    Example:
-        >>> df_enriched = enrich_with_regional_groups(df, radius_km=5, min_samples=2)
-    """
-    clf = RegionalGroupClassifier(radius_km=radius_km, min_samples=min_samples)
-    return clf.fit_predict(df)
+        fig, ax = plt.subplots(figsize=figsize)
+
+        # Paleta de cores para clusters multi-ponto
+        if len(cluster_ids) <= 20:
+            colors = cm.tab20.colors[:max(len(cluster_ids), 1)]
+        else:
+            colors = cm.hsv(np.linspace(0, 1, len(cluster_ids), endpoint=False))
+
+        # Clusters multi-ponto: círculos + estrela no centróide
+        for cluster_id, color in zip(cluster_ids, colors):
+            mask = labels == cluster_id
+            ax.scatter(
+                lons[mask], lats[mask],
+                c=[color], s=65, alpha=0.80, zorder=2,
+                label=f"Grupo {cluster_id} ({mask.sum()} pts)",
+            )
+            ax.scatter(
+                lons[mask].mean(), lats[mask].mean(),
+                c=[color], s=220, marker="*", edgecolors="black",
+                linewidths=0.8, zorder=4,
+            )
+
+        # Grupos isolados: losangos (◆) — cor única para não poluir a legenda
+        if isolated_ids:
+            iso_mask = np.isin(labels, isolated_ids)
+            ax.scatter(
+                lons[iso_mask], lats[iso_mask],
+                c="#E07B39", s=55, marker="D", edgecolors="#7B3000",
+                linewidths=0.7, alpha=0.75, zorder=3,
+                label=f"Isolados — grupo único por local ({len(isolated_ids)} pts)",
+            )
+
+        ax.set_xlabel("Longitude")
+        ax.set_ylabel("Latitude")
+        ax.set_title(
+            f"{title}\n"
+            f"raio={self.radius_km} km | min_samples={self.min_samples} | "
+            f"{len(cluster_ids)} clusters | {len(isolated_ids)} grupos isolados"
+        )
+        ax.legend(loc="best", fontsize=8, framealpha=0.8)
+        ax.grid(True, linestyle="--", alpha=0.4)
+        plt.tight_layout()
+
+        if save_path:
+            plt.savefig(save_path, dpi=150, bbox_inches="tight")
+            print(f"\u2713 Gráfico salvo em: {save_path}")
+        else:
+            plt.show()
+
+        plt.close(fig)
+
 
 if __name__ == "__main__":
-    # Exemplo de uso
     import polars as pl
 
-    # Carrega dados de exemplo (substitua pelo caminho real do CSV)
     df = pl.read_csv(r"use_case\files\consumption_consolidated.csv")
 
-    # Enriquece com grupos regionais
-    df_enriched = enrich_with_regional_groups(df, radius_km=5, min_samples=2)
+    clf = RegionalGroupClassifier(radius_km=40, min_samples=2)
+    df_enriched = clf.fit_predict(df)
     print(df_enriched.select(["grupo_regional"]).unique())
     print(df_enriched.select(["latitude", "longitude", "grupo_regional"]).head())
+    print(clf.get_cluster_summary())
+    clf.plot_clusters()

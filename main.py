@@ -1,4 +1,5 @@
 from use_case import data_modeling
+from use_case.data_modeling import enrich_csv_with_reference_id, enrich_csv_with_unit_id
 from db_setup import client
 from db_setup.postgre_sql import SyntaxPostgreeSQL as pg_query
 from db_setup.google_big_query import SyntaxBigQuery as bq_query
@@ -68,6 +69,20 @@ if __name__ == "__main__":
     print("INICIANDO PROCESSAMENTO DE CONSUMO HVAC")
     print("=" * 80)
     
+    csv_path = r'use_case\files\BradescoUnidadesSemAuto.csv'
+    pg_client = client.DatabaseConnectionClient(db_type=2)
+    mysql_client = client.DatabaseConnectionClient(db_type=3)
+
+    # Pré-etapa: enriquecimento do CSV ocorre sempre, independente de cache
+    print("\n=== PRÉ-ETAPA: ENRIQUECIMENTO DO CSV ===")
+    print("[1/10] Enriquecendo CSV com reference_id (MySQL → UNIT_ID)...")
+    enrich_csv_with_reference_id(csv_path, mysql_client.client)
+    print("✓ reference_id verificado/adicionado ao CSV")
+
+    print("[2/10] Enriquecendo CSV com unit_id (PostgreSQL → id interno)...")
+    enrich_csv_with_unit_id(csv_path, pg_client.client)
+    print("✓ unit_id verificado/adicionado ao CSV")
+
     # Verifica se o arquivo consolidado já existe e foi atualizado hoje
     output_path_raw = Path(r'use_case\files\consumption_consolidated.csv')
     output_path_final = Path(r'use_case\files\final_dataframe.csv')
@@ -120,21 +135,18 @@ if __name__ == "__main__":
         print("\n⚠ Arquivo consolidado não encontrado. Iniciando processamento completo...")
     
     # Processa o arquivo CSV de unidades Bradesco
-    print("\n[1/7] Carregando dados das unidades...")
-    csv_path = r'use_case\files\BradescoUnidadesSemAuto.csv'
-    df_units = data_modeling.process_client_units(csv_path)
+    print("\n[3/10] Carregando dados das unidades...")
+    df_units = data_modeling.process_client_units(csv_path, date_auto_name='data_inicio')
     print(f"✓ {df_units.shape[0]} unidades carregadas")
 
-    # Conexão com PostgreSQL e execução de query
-    print("\n[2/8] Consultando dispositivos no PostgreSQL...")
-    pg_client = client.DatabaseConnectionClient(db_type=2)
-    query_dev_by_units = pg_query.get_devices_by_units(units=df_units['id_bradesco'].to_list())
+    # Consulta dispositivos no PostgreSQL
+    print("\n[4/10] Consultando dispositivos no PostgreSQL...")
+    query_dev_by_units = pg_query.get_devices_by_units(units=df_units['unit_id'].drop_nulls().cast(pl.Int64).to_list())
     df_devices_by_units = pg_client.data_convert_to_polars(query_dev_by_units)
     print(f"✓ {df_devices_by_units.shape[0]} dispositivos encontrados")
     
     # Consulta dados de localização e tipo de máquina via MySQL (BigQuery Federation)
-    print("\n[3/8] Consultando dados de localização e machine_type via MySQL...")
-    mysql_client = client.DatabaseConnectionClient(db_type=3)
+    print("\n[5/10] Consultando dados de localização e machine_type via MySQL...")
     query_location = mysql_query.get_environment_monitoring_data()
     df_location_data = mysql_client.data_convert_to_polars(query_location)
     
@@ -152,11 +164,11 @@ if __name__ == "__main__":
     print(f"  Colunas: {df_location_data.columns}")
     
     # Consulta registros de disponibilidade para filtrar datas válidas
-    print("\n[4/8] Consultando disponibilidade dos dispositivos...")
+    print("\n[6/10] Consultando disponibilidade dos dispositivos...")
     date_min_global = df_units['data_instalacao'].min()
     date_max_global = df_units['data_inicio_automacao'].max()
     query_disponibility = pg_query.get_record_dates_above_disponibility_threshold(
-        units=df_units['id_bradesco'].to_list(),
+        units=df_units['unit_id'].drop_nulls().cast(pl.Int64).to_list(),
         threshold=75,
         date_init=str(date_min_global),
         date_final=str(date_max_global)
@@ -176,7 +188,7 @@ if __name__ == "__main__":
     versions = df_versions_by_units['device_version'].unique().to_list()
     
     # Consulta famílias de dispositivos com dados válidos de consumo no PostgreSQL
-    print("\n[5/8] Identificando versões com dados de corrente...")
+    print("\n[7/10] Identificando versões com dados de corrente...")
     query_valid_families = pg_query.get_devices_families_with_current_parameter()
     df_valid_families = pg_client.data_convert_to_polars(query_valid_families)
     valid_device_prefixes = df_valid_families['device_prefix'].to_list()
@@ -188,7 +200,7 @@ if __name__ == "__main__":
     print(f"  Versões selecionadas: {versions_filtered}")
     
     # Cria cliente BigQuery uma única vez
-    print("\n[6/8] Conectando ao BigQuery...")
+    print("\n[8/10] Conectando ao BigQuery...")
     bq_client = client.DatabaseConnectionClient(db_type=1)
     print("✓ Conexão estabelecida")
     
@@ -196,12 +208,12 @@ if __name__ == "__main__":
     all_consumption_data = []
     
     # Pré-calcula dataframe com unit_id e datas para reutilização
-    units_with_dates = df_units.select(['id_bradesco', 'data_instalacao', 'data_inicio_automacao'])
+    units_with_dates = df_units.select(['unit_id', 'data_instalacao', 'data_inicio_automacao'])
 
-    print("\n[7/8] Processando consumo DIRETO (BigQuery)...")
+    print("\n[9/10] Processando consumo DIRETO (BigQuery)...")
     for version in tqdm(versions_filtered, desc="Progresso BigQuery", unit="versão"):
         df_target_units = df_versions_by_units.filter(pl.col('device_version') == version).select('unit_id')
-        df_date_units = units_with_dates.join(df_target_units, left_on='id_bradesco', right_on='unit_id', how='inner')
+        df_date_units = units_with_dates.join(df_target_units, on='unit_id', how='inner')
         date_min = df_date_units['data_instalacao'].min()
         date_max = df_date_units['data_inicio_automacao'].max()
         # Pré-computa lista de unit_ids para reutilização
@@ -219,8 +231,7 @@ if __name__ == "__main__":
             pl.col('device_version') == version
         ).join(
             df_date_units,
-            left_on='unit_id',
-            right_on='id_bradesco',
+            on='unit_id',
             how='inner'
         ).select(['device_code', 'unit_id', 'data_instalacao', 'data_inicio_automacao'])
         
@@ -320,7 +331,7 @@ if __name__ == "__main__":
         all_devices = df_devices_by_units['device_code'].unique().to_list()
         devices_without_consumption = [d for d in all_devices if d not in devices_with_consumption]
         
-        print(f"\n[8/8] Processando consumo INDIRETO (PostgreSQL)...")
+        print(f"\n[10/10] Processando consumo INDIRETO (PostgreSQL)...")
         print(f"  Dispositivos com consumo direto: {len(devices_with_consumption)}")
         print(f"  Dispositivos para método indireto: {len(devices_without_consumption)}")
         
@@ -330,8 +341,7 @@ if __name__ == "__main__":
                 pl.col('device_code').is_in(devices_without_consumption)
             ).join(
                 units_with_dates,
-                left_on='unit_id',
-                right_on='id_bradesco',
+                on='unit_id',
                 how='inner'
             ).select(['device_code', 'unit_id', 'data_instalacao', 'data_inicio_automacao'])
             
