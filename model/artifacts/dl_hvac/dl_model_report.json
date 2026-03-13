@@ -1,105 +1,105 @@
 {
-  "timestamp": "2026-03-11T19:02:01",
+  "timestamp": "2026-03-12T14:35:42",
   "n_segments": 9,
   "consolidated": {
     "n_train": 143490,
     "n_val": 7557,
     "n_test": 37768,
-    "MAE": 0.41201,
-    "RMSE": 0.527411,
-    "WMAPE": 17.887409,
-    "Acuracia": 82.112591
+    "MAE": 0.602824,
+    "RMSE": 0.771121,
+    "WMAPE": 18.949298,
+    "Acuracia": 81.050702
   },
   "segmented": {
     "AR CONDICIONADO DE JANELA (ACJ)": {
       "n_train": 1338,
       "n_val": 71,
       "n_test": 353,
-      "MAE": 0.379992,
-      "RMSE": 0.432424,
-      "R2": 0.035957,
-      "WMAPE": 32.460808,
-      "Acuracia": 67.539192
+      "MAE": 0.365845,
+      "RMSE": 0.412496,
+      "R2": 0.122766,
+      "WMAPE": 31.252304,
+      "Acuracia": 68.747696
     },
     "SPLIT CASSETE": {
       "n_train": 10328,
       "n_val": 544,
       "n_test": 2719,
-      "MAE": 0.47462,
-      "RMSE": 0.598094,
-      "R2": 0.306647,
-      "WMAPE": 16.517687,
-      "Acuracia": 83.482313
+      "MAE": 0.479886,
+      "RMSE": 0.605294,
+      "R2": 0.289853,
+      "WMAPE": 16.700956,
+      "Acuracia": 83.299044
     },
     "SPLIT DUTO": {
       "n_train": 2855,
       "n_val": 151,
       "n_test": 752,
-      "MAE": 0.539212,
-      "RMSE": 0.833508,
-      "R2": 0.496577,
-      "WMAPE": 14.37597,
-      "Acuracia": 85.62403
+      "MAE": 0.560283,
+      "RMSE": 0.835376,
+      "R2": 0.494318,
+      "WMAPE": 14.93773,
+      "Acuracia": 85.06227
     },
     "SPLIT HI-WALL": {
       "n_train": 63799,
       "n_val": 3358,
       "n_test": 16790,
-      "MAE": 0.210414,
-      "RMSE": 0.267881,
-      "R2": 0.312348,
-      "WMAPE": 17.418007,
-      "Acuracia": 82.581993
+      "MAE": 0.210971,
+      "RMSE": 0.267876,
+      "R2": 0.312378,
+      "WMAPE": 17.464128,
+      "Acuracia": 82.535872
     },
     "SPLIT PISO-TETO": {
       "n_train": 50848,
       "n_val": 2677,
       "n_test": 13382,
-      "MAE": 0.546564,
-      "RMSE": 0.676072,
-      "R2": 0.191602,
-      "WMAPE": 20.800856,
-      "Acuracia": 79.199144
+      "MAE": 0.547303,
+      "RMSE": 0.677085,
+      "R2": 0.189177,
+      "WMAPE": 20.828989,
+      "Acuracia": 79.171011
     },
     "SPLIT\u00c3O": {
       "n_train": 11881,
       "n_val": 626,
       "n_test": 3127,
-      "MAE": 0.710901,
-      "RMSE": 0.95082,
-      "R2": 0.290649,
-      "WMAPE": 10.387856,
-      "Acuracia": 89.612144
+      "MAE": 0.724895,
+      "RMSE": 0.959552,
+      "R2": 0.263185,
+      "WMAPE": 10.6159,
+      "Acuracia": 89.3841
     },
     "SPLIT\u00c3O INVERTER": {
       "n_train": 1593,
       "n_val": 84,
       "n_test": 420,
-      "MAE": 1.196852,
-      "RMSE": 1.939933,
-      "R2": 0.983643,
-      "WMAPE": 6.890377,
-      "Acuracia": 93.109623
+      "MAE": 18.214949,
+      "RMSE": 23.798677,
+      "R2": -1.410825,
+      "WMAPE": 97.667534,
+      "Acuracia": 2.332466
     },
     "SPLIT\u00c3O ROOFTOP": {
       "n_train": 193,
       "n_val": 11,
       "n_test": 52,
-      "MAE": 1.979151,
-      "RMSE": 2.134512,
-      "R2": -5.252353,
-      "WMAPE": 24.716784,
-      "Acuracia": 75.283216
+      "MAE": 1.516974,
+      "RMSE": 1.72709,
+      "R2": -1.755742,
+      "WMAPE": 19.157597,
+      "Acuracia": 80.842403
     },
     "SPLIT\u00c3O SELF CONTAINED": {
       "n_train": 655,
       "n_val": 35,
       "n_test": 173,
-      "MAE": 0.318604,
-      "RMSE": 0.402726,
-      "R2": -0.60344,
-      "WMAPE": 5.336674,
-      "Acuracia": 94.663326
+      "MAE": 0.289332,
+      "RMSE": 0.346465,
+      "R2": -0.112836,
+      "WMAPE": 4.816394,
+      "Acuracia": 95.183606
     }
   }
 }

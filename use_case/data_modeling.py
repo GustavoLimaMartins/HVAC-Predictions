@@ -6,23 +6,61 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import polars as pl
 from typing import Union
+import csv
 from db_setup.my_sql import SyntaxMySQL
 from db_setup.postgre_sql import SyntaxPostgreeSQL, Client as PostgreSQLClient
 
-def read_csv_to_polars(file_path: Union[str, Path]) -> pl.DataFrame:
+
+def detect_delimiter(file_path: Union[str, Path]) -> str:
     """
-    Lê arquivo CSV e converte para Polars DataFrame.
+    Detecta automaticamente o delimitador de um arquivo CSV.
+    Tenta: ';', ',', '\t', '|'
     
     Args:
         file_path: Caminho para o arquivo CSV
     
     Returns:
-        pl.DataFrame: DataFrame com os dados do CSV
+        str: O delimitador detectado (padrão: ',')
     """
-    return pl.read_csv(file_path)
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            sample = f.read(2048)
+            try:
+                dialect = csv.Sniffer().sniff(sample, delimiters=';,\t|')
+                return dialect.delimiter
+            except csv.Error:
+                # Se Sniffer falhar, tenta heurística simples
+                first_line = sample.split('\n')[0]
+                for delim in [';', ',', '\t', '|']:
+                    if delim in first_line:
+                        return delim
+                return ','
+    except Exception:
+        return ','
 
 
-def process_client_units(file_path: Union[str, Path], date_auto_name: str) -> pl.DataFrame:
+def read_csv_to_polars(file_path: Union[str, Path], sep: str = None) -> pl.DataFrame:
+    """
+    Lê arquivo CSV e converte para Polars DataFrame.
+    
+    Args:
+        file_path: Caminho para o arquivo CSV
+        sep: Delimitador do CSV. Se None, detecta automaticamente.
+             Valores comuns: ',', ';', '\t', '|'
+    
+    Returns:
+        pl.DataFrame: DataFrame com os dados do CSV
+        
+    Exemplo:
+        >>> df = read_csv_to_polars('dados.csv')  # auto-detecta
+        >>> df = read_csv_to_polars('dados.csv', sep=';')  # força ponto-e-vírgula
+    """
+    if sep is None:
+        sep = detect_delimiter(file_path)
+    return pl.read_csv(file_path, separator=sep)
+
+
+def process_client_units(file_path: Union[str, Path], date_auto_name: str, sep: str = None) -> pl.DataFrame:
     """
     Processa arquivo CSV de unidades Bradesco, adicionando a coluna data_instalacao.
     
@@ -30,17 +68,21 @@ def process_client_units(file_path: Union[str, Path], date_auto_name: str) -> pl
     
     Args:
         file_path: Caminho para o arquivo CSV. Ex: 'BradescoUnidadesSemAuto.csv'
+        date_auto_name: Nome da coluna com data de início da automação
+        sep: Delimitador do CSV. Se None, detecta automaticamente.
     
     Returns:
         pl.DataFrame: DataFrame processado com a coluna data_instalacao
     
     Exemplo:
-        >>> df = process_bradesco_units('BradescoUnidadesSemAuto.csv')
+        >>> df = process_client_units('BradescoUnidadesSemAuto.csv', 'data_inicio')
         >>> print(df.columns)
         ['id_bradesco', 'unit_name', 'data_inicio_automacao', 'dias_antes_automacao', 'data_instalacao']
     """
     # Lê o CSV
-    df = pl.read_csv(file_path)
+    if sep is None:
+        sep = detect_delimiter(file_path)
+    df = pl.read_csv(file_path, separator=sep)
     
     # Converte data_inicio_automacao para o formato de data (está em MM/DD/YY)
     df = df.with_columns(
@@ -60,6 +102,7 @@ def enrich_csv_with_reference_id(
     file_path: Union[str, Path],
     mysql_client: SyntaxMySQL,
     output_path: Union[str, Path] = None,
+    sep: str = None,
 ) -> pl.DataFrame:
     """
     Adiciona a coluna 'reference_id' ao CSV de unidades a partir dos UNIT_IDs
@@ -75,11 +118,14 @@ def enrich_csv_with_reference_id(
         mysql_client (SyntaxMySQL): Instância conectada para executar a query federada.
         output_path (str | Path | None): Destino do CSV enriquecido.
             Se None, sobrescreve file_path.
+        sep (str | None): Delimitador do CSV. Se None, detecta automaticamente.
 
     Returns:
         pl.DataFrame: DataFrame original acrescido da coluna 'reference_id' (Int64).
     """
-    df = pl.read_csv(file_path)
+    if sep is None:
+        sep = detect_delimiter(file_path)
+    df = pl.read_csv(file_path, separator=sep)
 
     if "reference_id" in df.columns:
         print("  ↳ 'reference_id' já presente no CSV. Etapa ignorada.")
@@ -87,7 +133,7 @@ def enrich_csv_with_reference_id(
 
     unit_names = df["unit_name"].to_list()
 
-    query = SyntaxMySQL.get_devices_by_units_by_unit_names(unit_names)
+    query = SyntaxMySQL.fetch_devices_by_unit_names(unit_names)
     result = mysql_client.execute_query(query, verbose=False)
 
     # Mapeamento único unit_name → unit_id (uma linha por unidade)
@@ -101,7 +147,7 @@ def enrich_csv_with_reference_id(
     df = df.join(unit_id_map, on="unit_name", how="left")
 
     dest = Path(output_path) if output_path else Path(file_path)
-    df.write_csv(dest)
+    df.write_csv(dest, separator=sep)
 
     return df
 
@@ -110,6 +156,7 @@ def enrich_csv_with_unit_id(
     file_path: Union[str, Path],
     pg_client: PostgreSQLClient,
     output_path: Union[str, Path] = None,
+    sep: str = None,
 ) -> pl.DataFrame:
     """
     Adiciona a coluna 'unit_id' ao CSV de unidades a partir dos IDs internos
@@ -127,6 +174,7 @@ def enrich_csv_with_unit_id(
         pg_client (PostgreSQLClient): Instância conectada ao PostgreSQL.
         output_path (str | Path | None): Destino do CSV enriquecido.
             Se None, sobrescreve file_path.
+        sep (str | None): Delimitador do CSV. Se None, detecta automaticamente.
 
     Returns:
         pl.DataFrame: DataFrame original acrescido da coluna 'unit_id' (Int64).
@@ -134,7 +182,9 @@ def enrich_csv_with_unit_id(
     Raises:
         ValueError: Se a coluna 'reference_id' não existir no CSV.
     """
-    df = pl.read_csv(file_path)
+    if sep is None:
+        sep = detect_delimiter(file_path)
+    df = pl.read_csv(file_path, separator=sep)
 
     if "unit_id" in df.columns:
         print("  ↳ 'unit_id' já presente no CSV. Etapa ignorada.")
@@ -163,16 +213,16 @@ def enrich_csv_with_unit_id(
     df = df.join(unit_id_map, on="reference_id", how="left")
 
     dest = Path(output_path) if output_path else Path(file_path)
-    df.write_csv(dest)
+    df.write_csv(dest, separator=sep)
 
     return df
 
 
 if __name__ == "__main__":
-    csv_path = r'use_case\files\BradescoUnidadesSemAuto.csv'
+    csv_path = r'use_case\files\BradescoUnidadesSemAuto_updated.CSV'
 
     # 1. Processa datas e data_instalacao
-    df_processed = process_client_units(csv_path)
+    df_processed = process_client_units(csv_path, date_auto_name="data_inicio")
     print("Primeiras 5 linhas do DataFrame processado:")
     print(df_processed.head())
 

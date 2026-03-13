@@ -8,8 +8,7 @@ class DataFrameFormatter:
     
     Pipeline completo:
     1. Enriquece com features complementares (estações, clima, grupos regionais)
-    2. Cria features binárias is_dac e is_dut baseadas em device_id
-    3. Remove colunas desnecessárias para modelo
+    2. Remove colunas desnecessárias para modelo
     
     Example:
         >>> formatter = DataFrameFormatter()
@@ -28,21 +27,6 @@ class DataFrameFormatter:
             'latitude',
             'longitude'
         ]
-    
-    def create_device_type_features(self, df: pl.DataFrame) -> pl.DataFrame:
-        """
-        Cria features binárias baseadas no tipo de dispositivo.
-        
-        Args:
-            df: DataFrame com coluna 'device_id'
-        
-        Returns:
-            DataFrame com novas colunas 'is_dac' e 'is_dut' (0 ou 1)
-        """
-        return df.with_columns([
-            pl.col('device_id').str.starts_with('DAC').cast(pl.Int8).alias('is_dac'),
-            pl.col('device_id').str.starts_with('DUT').cast(pl.Int8).alias('is_dut')
-        ])
     
     def drop_unnecessary_columns(self, df: pl.DataFrame) -> pl.DataFrame:
         """
@@ -112,16 +96,13 @@ class DataFrameFormatter:
             >>> formatter = DataFrameFormatter()
             >>> df_ready = formatter.format_for_model(df_raw)
         """
-        # 1. Cria features binárias
-        df_with_features = self.create_device_type_features(df)
+        # 1. Formata colunas de data
+        df_dated = self.format_date_columns(df)
         
-        # 2. Formata colunas de data
-        df_with_features = self.format_date_columns(df_with_features)
+        # 2. Remove colunas desnecessárias
+        df_formatted = self.drop_unnecessary_columns(df_dated)
         
-        # 3. Remove colunas desnecessárias
-        df_formatted = self.drop_unnecessary_columns(df_with_features)
-        
-        # 4. Remove linhas com nulos
+        # 3. Remove linhas com nulos
         df_clean = self.drop_null_rows(df_formatted)
         
         return df_clean

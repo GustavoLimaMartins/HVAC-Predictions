@@ -78,7 +78,6 @@ _SCHEMA_FIELDS: list[str] = [
     "Temperatura_C", "Temperatura_Percebida_C",
     "Umidade_Relativa_%", "Precipitacao_mm",
     "Velocidade_Vento_kmh", "Pressao_Superficial_hPa",
-    "is_dac", "is_dut",
 ]
 
 # Colunas declaradas como categórico nativo no LightGBM (via categorical_feature).
@@ -1467,7 +1466,7 @@ if __name__ == "__main__":
             col, float(s.min()), float(s.max()), float(s.mean()),
         )
 
-    bool_cols = ["is_feriado", "is_vespera_feriado", "is_dia_util", "is_dac", "is_dut"]
+    bool_cols = ["is_feriado", "is_vespera_feriado", "is_dia_util"]
     _logger.info("  Features booleanas (taxa de True):")
     for col in bool_cols:
         if col in df_schema.columns:
@@ -1491,65 +1490,65 @@ if __name__ == "__main__":
         random_state=42,
         noise_floor=0.7,
         iqr_factor=1.5,
-        min_segment_size=50,
-        noise_quantile=0.08,
-        upper_quantile_cap=0.99,
+        min_segment_size=35,
+        noise_quantile=0.15,
+        upper_quantile_cap=0.85,
         segment_params={
             # Chave deve ser o tipo normalizado (exibido no log Outliers[...])
             # Exemplos de sobrescrita por segmento:
             "AR CONDICIONADO DE JANELA (ACJ)": {
                 "iqr_factor": 1.15,
                 "noise_floor": 0.59,
-                "upper_quantile_cap": 0.85,
+                "upper_quantile_cap": 0.75,
                 "noise_quantile": 0.15,
             },
             "SPLIT CASSETE": {
                 "iqr_factor": 1.20,
                 "noise_floor": 1.59,
-                "upper_quantile_cap": 0.85,
+                "upper_quantile_cap": 0.75,
                 "noise_quantile": 0.15,
             },
             "SPLIT DUTO": {
                 "iqr_factor": 1.25,
                 "noise_floor": 1.69,
-                "upper_quantile_cap": 0.85,
+                "upper_quantile_cap": 0.75,
                 "noise_quantile": 0.15,
             },
             "SPLIT HI-WALL": {
                 "iqr_factor": 1.25,
                 "noise_floor": 0.79,
-                "upper_quantile_cap": 0.85,
+                "upper_quantile_cap": 0.75,
                 "noise_quantile": 0.15,
             },
             "SPLIT PISO-TETO": {
                 "iqr_factor": 1.25,
                 "noise_floor": 1.59,
-                "upper_quantile_cap": 0.85,
+                "upper_quantile_cap": 0.75,
                 "noise_quantile": 0.15,
             },
             "SPLITÃO": {
                 "iqr_factor": 1.5,
                 "noise_floor": 5.49,
-                "upper_quantile_cap": 0.95,
-                "noise_quantile": 0.10,
+                "upper_quantile_cap": 0.90,
+                "noise_quantile": 0.25,
             },
             "SPLITÃO INVERTER": {
                 "iqr_factor": 1.35,
                 "noise_floor": 3.49,
-                "upper_quantile_cap": 0.95,
-                "noise_quantile": 0.10,
+                "upper_quantile_cap": 0.90,
+                "noise_quantile": 0.25,
             },
             "SPLITÃO ROOFTOP": {
                 "iqr_factor": 1.5,
                 "noise_floor": 5.99,
-                "upper_quantile_cap": 0.95,
-                "noise_quantile": 0.10
+                "upper_quantile_cap": 0.90,
+                "noise_quantile": 0.25
             },
             "SPLITÃO SELF CONTAINED": {
                 "iqr_factor": 1.5,
                 "noise_floor": 5.49,
-                "upper_quantile_cap": 0.95,
-                "noise_quantile": 0.10
+                "upper_quantile_cap": 0.90,
+                "noise_quantile": 0.25
             }
         },
     )
@@ -1578,7 +1577,19 @@ if __name__ == "__main__":
     # -- 6. Demo: predição das 10 primeiras linhas (global vs segmentado) -----
     _log_block("DEMO — Predição das 10 primeiras linhas do dataset")
 
-    df_demo = df_raw.head(10)
+    # Aplica o mesmo filtro de outliers usado no treino para que o demo
+    # contenha apenas registros representativos (sem ruído / extremos).
+    df_clean, _ = _filter_outliers(
+        df_raw,
+        noise_floor=cfg.noise_floor,
+        iqr_factor=cfg.iqr_factor,
+        min_segment_size=cfg.min_segment_size,
+        noise_quantile=cfg.noise_quantile,
+        upper_quantile_cap=cfg.upper_quantile_cap,
+        segment_params=cfg.segment_params,
+    )
+
+    df_demo = df_clean.head(10)
     y_real  = df_demo[_TARGET].to_numpy()
 
     # Prepara input sem target

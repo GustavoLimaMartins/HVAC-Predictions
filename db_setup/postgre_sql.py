@@ -187,7 +187,6 @@ class SyntaxPostgreeSQL:
     def get_devices_by_units(units: list[int]) -> str:
         """
         Retorna query SQL para obter dispositivos únicos por unidade usando a tabela device_disponiblity_hist.
-        Filtra apenas dispositivos que começam com 'DAC'.
         
         Args:
             units (list[int]): Lista de IDs de unidades. Ex: [895, 1322, 302]

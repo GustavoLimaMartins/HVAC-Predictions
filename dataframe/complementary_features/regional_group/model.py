@@ -337,6 +337,62 @@ class RegionalGroupClassifier(UnsupervisedGeoModel):
         ]
         return pl.DataFrame(rows).with_columns(pl.col("grupo_regional").cast(pl.Int32))
 
+    def export_mapping(self, output_path: str | None = None) -> pl.DataFrame:
+        """
+        Exporta o mapeamento de grupos regionais para arquivo Parquet.
+
+        Salva um artefato contendo todas as coordenadas únicas e seus rótulos
+        atribuídos. Este arquivo é usado pela inferência (via BallTree KNN-1)
+        para atribuir grupos a coordenadas novas sem re-treinar o DBSCAN.
+
+        O artefato é denominado 'geo_reference.parquet' e será automaticamente
+        carregado pela classe DLNormalizer durante a inferência.
+
+        Args:
+            output_path : Caminho para salvar o arquivo. Se None, usa o padrão:
+                         'use_case/files/geo_reference.parquet'
+
+        Returns:
+            pl.DataFrame com as colunas:
+                - latitude        : coordenada Y
+                - longitude       : coordenada X
+                - grupo_regional  : rótulo atribuído (Int32)
+
+        Raises:
+            ValueError: Se o modelo não foi treinado.
+        """
+        if not self.is_fitted:
+            raise ValueError("Modelo não treinado. Execute fit() primeiro.")
+
+        from pathlib import Path
+
+        # Define o caminho padrão se não fornecido
+        if output_path is None:
+            output_path = str(
+                Path(__file__).parent.parent.parent.parent / "use_case" / "files" / "geo_reference.parquet"
+            )
+
+        # Cria DataFrame com as coordenadas únicas e seus rótulos
+        df_mapping = self._unique_coords.with_columns(
+            pl.Series("grupo_regional", self._coord_labels, dtype=pl.Int32)
+        )
+
+        # Cria diretório se não existir
+        output_file = Path(output_path)
+        output_file.parent.mkdir(parents=True, exist_ok=True)
+
+        # Salva em formato Parquet
+        df_mapping.write_parquet(output_path)
+        print(
+            f"✓ Mapeamento de grupos regionais exportado:\n"
+            f"  Arquivo: {output_path}\n"
+            f"  Registros: {len(df_mapping)}\n"
+            f"  Colunas: {df_mapping.columns}\n"
+            f"  Grupos: {self.n_total_groups_}"
+        )
+
+        return df_mapping
+
     def plot_clusters(
         self,
         title: str = "Grupos Regionais — DBSCAN + Haversine",

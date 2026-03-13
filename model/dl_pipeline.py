@@ -12,7 +12,7 @@ Fluxo de 5 estágios + 2 pré-etapas:
     PRÉ-ETAPA 2  SegmentedDLPipeline  — um DLPipeline por tipo de máquina HVAC
 
     1. CONFIG      DLPipelineConfig   — arquitetura, treino, callbacks
-    2. PREPROCESS  DLSchema.build()   — cyclical encoding, embedding prep
+    2. PREPROCESS  FeatureDeriver + ModelSchema — derivação de features + schema
     3. TRAIN       fit()              — Wide & Deep + EarlyStopping
     4. EVALUATE    _compute_metrics() — MAE / RMSE / R² / WMAPE
     5. PERSIST     save() / load()    — SavedModel + JSON
@@ -22,6 +22,16 @@ Inferência:
     ``tools/normalizer.py`` (classe ``DLNormalizer``), garantindo que a
     normalização em inferência seja **idêntica** ao fluxo de treino sem
     duplicar lógica.
+
+REFATORAÇÃO (Message 15):
+    Eliminado DLSchema — classe que reimplementava logic. de FeatureDeriver
+    + ModelSchema. Novo fluxo de _preprocess():
+    
+    1. _assign_grupo_regional_knn() → geo lookup via BallTree Haversine
+    2. ModelSchema.add_date_features() → period_dia + features temporais
+    3. ModelSchema.adjust_machine_type() + OHE + Clipping+MinMax
+    4. Extrai embeddings Int32 (hora, mes, grupo_regional, periodo_dia)
+    5. Retorna X_emb dict + X_dense array (idêntico ao anterior)
 
 Arquitetura Wide & Deep:
 
@@ -65,6 +75,7 @@ os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
 os.environ.setdefault("TF_ENABLE_ONEDNN_OPTS", "0")
 
 import datetime
+import datetime
 import json
 import logging
 import sys
@@ -102,7 +113,7 @@ logging.getLogger("absl").setLevel(logging.ERROR)
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from model.pre_process.schema import ModelSchema
-from tools.normalizer import DLNormalizer
+from tools.normalizer import DLNormalizer, _assign_grupo_regional_knn, compute_normalization_stats
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -120,19 +131,7 @@ _SCHEMA_FIELDS: list[str] = [
     "Temperatura_C", "Temperatura_Percebida_C",
     "Umidade_Relativa_%", "Precipitacao_mm",
     "Velocidade_Vento_kmh", "Pressao_Superficial_hPa",
-    "is_dac", "is_dut",
 ]
-
-# Colunas categóricas → Entity Embeddings (NÃO entram em X_dense)
-# Cada entrada: nome_coluna → cardinalidade máxima (input_dim do Embedding)
-# A dimensão do Embedding é configurada em DLPipelineConfig.
-_EMBEDDING_COLS: dict[str, int] = {
-    "grupo_regional": 0,   # preenchido em runtime (max+1 do dataset)
-    "hora":           24,  # 0-23
-    "mes":            13,  # 1-12 (índice 0 não usado, mas reservado)
-    "periodo_dia":    4,   # Madrugada(0), Manhã(1), Tarde(2), Noite(3)
-}
-
 
 # ══════════════════════════════════════════════════════════════════════════════
 #  HELPERS DE LOG
@@ -210,84 +209,6 @@ def _compute_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> dict[str, float]
 # ══════════════════════════════════════════════════════════════════════════════
 #  DL SCHEMA — estágio 2
 # ══════════════════════════════════════════════════════════════════════════════
-
-class DLSchema:
-    """
-    Schema de pré-processamento adaptado para a DLPipeline.
-
-    Reutiliza ModelSchema.build() como base completa e aplica apenas as
-    transformações específicas da arquitetura Wide & Deep:
-
-    hora, mes        → Int32 puro para Entity Embedding Layers
-    grupo_regional   → Int32 puro para Entity Embedding Layer
-    periodo_dia      → Int32 derivado de hora (4 faixas) para Entity Embedding
-    demais           → idêntico ao schema ML (adjust_machine_type + OHE,
-                       Clipping+MinMax, features de data)
-
-    Entity Embeddings (Guo & Berkhahn, 2016) substituem Cyclical Encoding:
-    a rede neural aprende representações densas (vetores contínuos) para
-    cada valor categórico, capturando relações não-lineares entre horas
-    do dia, meses do ano e o consumo energético — sem impor premissa de
-    circularidade como sin/cos.
-
-    Ao delegar ao ModelSchema.build() completo garante-se que todos os
-    rótulos de machine_type são tratados (adjust_machine_type → OHE de
-    tipo_maquina) sem duplicação de lógica.
-    """
-
-    def __init__(self, df: pl.DataFrame) -> None:
-        self.df = df.clone()
-
-    def build(self) -> pl.DataFrame:
-        """
-        Executa o pipeline DL delegando ao ModelSchema e substituindo
-        apenas os artefatos incompatíveis com a arquitetura Wide & Deep.
-
-        Estratégia
-        ----------
-        1. Extrai hora, mes e grupo_regional brutos do df original —
-           necessários para os Entity Embeddings após o build ML.
-        2. Executa ModelSchema.build() completo: adjust_machine_type + OHE
-           de tipo_maquina/estacao/dia_semana/trimestre, Categorical de
-           mes/grupo_regional, Clipping+MinMax de clima, features de data.
-        3. Remove periodo_dia_* (OHE), mes e grupo_regional (Categorical)
-           — esses tratamentos não se aplicam ao Wide & Deep.
-        4. Adiciona hora, mes, grupo_regional e periodo_dia como Int32
-           puro para as respectivas Entity Embedding Layers.
-
-        Returns:
-            pl.DataFrame com hora, mes, grupo_regional, periodo_dia
-            (Int32) + demais features densas prontas.
-        """
-        # etapa 1 — preserva valores brutos antes do build ML
-        hora_arr  = self.df["hora"].to_numpy().astype(np.int32)
-        mes_arr   = self.df["data"].cast(pl.Date).dt.month().to_numpy().astype(np.int32)
-        grupo_arr = self.df["grupo_regional"].to_numpy().astype(np.int32)
-
-        # periodo_dia derivado de hora (Madrugada=0, Manhã=1, Tarde=2, Noite=3)
-        periodo_arr = np.where(
-            hora_arr <= 6, 0,
-            np.where(hora_arr <= 11, 1,
-                     np.where(hora_arr <= 18, 2, 3)),
-        ).astype(np.int32)
-
-        # etapa 2 — schema ML completo (inclui tratamento correto de tipo_maquina)
-        df_ml = ModelSchema(self.df, _SCHEMA_FIELDS).build()
-
-        # etapa 3 — remove artefatos incompatíveis com DL (OHE/Categorical)
-        periodo_ohe = [c for c in df_ml.columns if c.startswith("periodo_dia_")]
-        drop_cols   = periodo_ohe + [c for c in ("mes", "grupo_regional") if c in df_ml.columns]
-        df_dl       = df_ml.drop(drop_cols)
-
-        # etapa 4 — Int32 para Entity Embeddings
-        df_dl = df_dl.with_columns([
-            pl.Series("hora",           hora_arr),
-            pl.Series("mes",            mes_arr),
-            pl.Series("grupo_regional", grupo_arr),
-            pl.Series("periodo_dia",    periodo_arr),
-        ])
-
-        return df_dl
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -764,6 +685,7 @@ class DLPipeline:
         self.metrics_:         dict[str, float]        = {}
         self.train_info_:      dict                    = {}
         self._is_fitted:       bool                    = False
+        self._normalization_stats_: dict | None       = None  # Estatísticas de normalização
 
     # -- estágio 2 — pré-processamento ----------------------------------------
 
@@ -773,7 +695,10 @@ class DLPipeline:
         log_label: str = "PRE-PROCESSAMENTO",
     ) -> tuple[dict[str, np.ndarray], np.ndarray, np.ndarray, list[str], dict[str, int]]:
         """
-        Aplica DLSchema e separa Entity Embeddings das demais features.
+        Pré-processa dados usando FeatureDeriver + ModelSchema (sem DLSchema).
+
+        Refactoring: Elimina DLSchema (que reimplementava lógica) e usa
+        FeatureDeriver para derivação automática + ModelSchema direto.
 
         Returns:
             X_emb          : dict {nome → int32 array (n, 1)} para cada
@@ -804,11 +729,63 @@ class DLPipeline:
             "pct_removed":    round((_n_raw - _n_after) / _n_raw * 100, 2) if _n_raw else 0.0,
         }
 
-        _logger.info("Aplicando DLSchema...")
-        df_out = _sanitize_features(DLSchema(df).build())
+        # pré-etapa 2 — derivação de features + schema de transformação
+        _logger.info("Derivando grupo_regional via BallTree KNN...")
+        if "latitude" in df.columns and "longitude" in df.columns:
+            df = _assign_grupo_regional_knn(df)
+        
+        # pré-etapa 2b — aplicar ModelSchema para transformações ML
+        _logger.info("Aplicando ModelSchema (derivação + OHE + Clipping+MinMax, etc)...")
+        
+        # Instancia schema manualmente para controlar a ordem
+        schema = ModelSchema.__new__(ModelSchema)
+        schema.df = df.clone()
+        schema._schema_fields = _SCHEMA_FIELDS
+        
+        schema.add_date_features()
+        
+        # Depois aplica outras transformações
+        schema.adjust_machine_type()
+        schema.make_categorical_columns(["grupo_regional"])
+        schema.make_one_hot_encode_columns(["tipo_maquina", "estacao", "periodo_dia"])
+        schema.make_clipping_min_max_columns([
+            "Temperatura_C", "Temperatura_Percebida_C",
+            "Umidade_Relativa_%", "Precipitacao_mm",
+            "Velocidade_Vento_kmh", "Pressao_Superficial_hPa",
+        ])
+        
+        df_ml = schema.df
+        
+        hora_arr  = df_ml["hora"].to_numpy().astype(np.int32)
+        mes_arr   = df_ml["mes"].to_numpy().astype(np.int32)
+        grupo_arr = df_ml["grupo_regional"].to_numpy().astype(np.int32)
+        
+        # Madrugada (0-6), Manhã (7-11), Tarde (12-18), Noite (19-23)
+        periodo_arr = np.where(
+            hora_arr <= 6, 0,
+            np.where(hora_arr <= 11, 1,
+                     np.where(hora_arr <= 18, 2, 3)),
+        ).astype(np.int32)
+        
+        # pré-etapa 2d — remove artefatos incompatíveis com DL (OHE/Categorical)
+        periodo_ohe = [c for c in df_ml.columns if c.startswith("periodo_dia_")]
+        drop_cols   = periodo_ohe + [c for c in ("mes", "grupo_regional") if c in df_ml.columns]
+        df_dl       = df_ml.drop(drop_cols)
+
+        # pré-etapa 2e — adiciona Entity Embeddings como Int32
+        df_dl = df_dl.with_columns([
+            pl.Series("hora",           hora_arr),
+            pl.Series("mes",            mes_arr),
+            pl.Series("grupo_regional", grupo_arr),
+            pl.Series("periodo_dia",    periodo_arr),
+        ])
+        
+        # pré-etapa 2f — sanitiza NaN/inf → 0.0
+        df_dl = _sanitize_features(df_dl)
+        
         _logger.info(
             "Schema concluido: %d registros x %d colunas",
-            df_out.shape[0], df_out.shape[1],
+            df_dl.shape[0], df_dl.shape[1],
         )
 
         # Entity Embeddings → X_emb (int32, um Input por coluna)
@@ -816,17 +793,17 @@ class DLPipeline:
         X_emb: dict[str, np.ndarray] = {}
         emb_sizes: dict[str, int] = {}
         for col in emb_cols:
-            arr = df_out[col].to_numpy().astype(np.int32).reshape(-1, 1)
+            arr = df_dl[col].to_numpy().astype(np.int32).reshape(-1, 1)
             X_emb[col] = arr
             emb_sizes[col] = int(arr.max()) + 1
 
         # Demais features → X_dense (float32, Fluxo B)
-        dense_cols = [c for c in df_out.columns if c not in (_TARGET, *emb_cols)]
-        X_dense = df_out.select(
+        dense_cols = [c for c in df_dl.columns if c not in (_TARGET, *emb_cols)]
+        X_dense = df_dl.select(
             [pl.col(c).cast(pl.Float32) for c in dense_cols]
         ).to_numpy()
 
-        y = df_out[_TARGET].to_numpy().astype(np.float32)
+        y = df_dl[_TARGET].to_numpy().astype(np.float32)
         return X_emb, X_dense, y, dense_cols, emb_sizes
 
     # -- estágio 3 — construção e compilação do modelo ------------------------
@@ -856,7 +833,7 @@ class DLPipeline:
         Pre-processa os dados e treina o modelo Wide & Deep.
 
         Etapas:
-            1. DLSchema.build() → X_emb (dict), X_dense, y
+            1. FeatureDeriver.derive() + ModelSchema.build() → X_emb (dict), X_dense, y
             2. train_test_split (teste) → train_test_split (validação)
             3. _build_and_compile() → modelo Keras
             4. model.fit() com EarlyStopping + ReduceLROnPlateau
@@ -980,6 +957,13 @@ class DLPipeline:
         )
         self.history_   = {k: [float(v) for v in vals]
                            for k, vals in history.history.items()}
+        
+        # Calcula estatísticas de normalização a partir dos dados de treino
+        self._normalization_stats_ = compute_normalization_stats(
+            X_dense_tr,
+            feature_names=feature_columns,
+        )
+        
         self._is_fitted = True
 
         # -- avaliação no teste -----------------------------------------------
@@ -1040,8 +1024,9 @@ class DLPipeline:
 
         Estrutura gerada:
             {path}/
-                keras_model.keras  — modelo Keras formato nativo
-                meta.json          — feature_columns, n_groups, config, metrics
+                keras_model.keras        — modelo Keras formato nativo
+                meta.json                — feature_columns, n_groups, config, metrics
+                metadata_norm.json       — parâmetros de normalização para inferência
 
         Args:
             path: Diretorio de saida (criado automaticamente).
@@ -1075,6 +1060,36 @@ class DLPipeline:
         }
         with (path / "meta.json").open("w", encoding="utf-8") as fh:
             json.dump(meta, fh, indent=2, default=str)
+
+        # Exporta metadata de normalização com estatísticas de treino
+        _logger.info("Exportando parametros de normalização...")
+        metadata_norm = {
+            "version": "1.0",
+            "timestamp": datetime.datetime.now().isoformat(timespec="seconds"),
+            "dense_features": self._normalization_stats_ or {},
+            "embeddings": {
+                "grupo_regional": {
+                    "input_dim": self.n_groups_,
+                    "value_range": [0, self.n_groups_ - 1],
+                },
+                "hora": {
+                    "input_dim": self.n_horas_,
+                    "value_range": [0, self.n_horas_ - 1],
+                },
+                "mes": {
+                    "input_dim": self.n_meses_,
+                    "value_range": [1, self.n_meses_ - 1],
+                },
+                "periodo_dia": {
+                    "input_dim": self.n_periodos_,
+                    "value_range": [0, self.n_periodos_ - 1],
+                },
+            },
+            "metrics": self.metrics_,
+            "train_info": self.train_info_,
+        }
+        with (path / "metadata_norm.json").open("w", encoding="utf-8") as fh:
+            json.dump(metadata_norm, fh, indent=2, default=str)
 
         _logger.info("Pipeline salvo em: %s", path)
 
@@ -1516,63 +1531,63 @@ if __name__ == "__main__":
         noise_floor=0.7,
         iqr_factor=1.5,
         min_segment_size=50,
-        noise_quantile=0.08,
-        upper_quantile_cap=0.99,
+        noise_quantile=0.15,
+        upper_quantile_cap=0.85,
         segment_params={
             "AR CONDICIONADO DE JANELA (ACJ)": {
                 "iqr_factor": 1.15,
                 "noise_floor": 0.59,
-                "upper_quantile_cap": 0.85,
+                "upper_quantile_cap": 0.75,
                 "noise_quantile": 0.15,
             },
             "SPLIT CASSETE": {
                 "iqr_factor": 1.20,
                 "noise_floor": 1.59,
-                "upper_quantile_cap": 0.85,
+                "upper_quantile_cap": 0.75,
                 "noise_quantile": 0.15,
             },
             "SPLIT DUTO": {
                 "iqr_factor": 1.25,
                 "noise_floor": 1.69,
-                "upper_quantile_cap": 0.85,
+                "upper_quantile_cap": 0.75,
                 "noise_quantile": 0.15,
             },
             "SPLIT HI-WALL": {
                 "iqr_factor": 1.25,
                 "noise_floor": 0.79,
-                "upper_quantile_cap": 0.85,
+                "upper_quantile_cap": 0.75,
                 "noise_quantile": 0.15,
             },
             "SPLIT PISO-TETO": {
                 "iqr_factor": 1.25,
                 "noise_floor": 1.59,
-                "upper_quantile_cap": 0.85,
+                "upper_quantile_cap": 0.75,
                 "noise_quantile": 0.15,
             },
             "SPLITÃO": {
                 "iqr_factor": 1.5,
                 "noise_floor": 5.49,
-                "upper_quantile_cap": 0.95,
-                "noise_quantile": 0.10,
+                "upper_quantile_cap": 0.90,
+                "noise_quantile": 0.25,
             },
             "SPLITÃO INVERTER": {
                 "iqr_factor": 1.35,
                 "noise_floor": 3.49,
-                "upper_quantile_cap": 0.95,
-                "noise_quantile": 0.10,
+                "upper_quantile_cap": 0.90,
+                "noise_quantile": 0.25,
             },
             "SPLITÃO ROOFTOP": {
                 "iqr_factor": 1.5,
                 "noise_floor": 5.99,
-                "upper_quantile_cap": 0.95,
-                "noise_quantile": 0.10,
+                "upper_quantile_cap": 0.90,
+                "noise_quantile": 0.25
             },
             "SPLITÃO SELF CONTAINED": {
                 "iqr_factor": 1.5,
                 "noise_floor": 5.49,
-                "upper_quantile_cap": 0.95,
-                "noise_quantile": 0.10,
-            },
+                "upper_quantile_cap": 0.90,
+                "noise_quantile": 0.25
+            }
         },
     )
 
@@ -1594,7 +1609,19 @@ if __name__ == "__main__":
     # -- 8. Demo: predição das 10 primeiras linhas (global vs segmentado) -----
     _log_block("DEMO — Predição DL das 10 primeiras linhas do dataset")
 
-    df_demo = df_raw.head(10)
+    # Aplica o mesmo filtro de outliers usado no treino para que o demo
+    # contenha apenas registros representativos (sem ruído / extremos).
+    df_clean = _filter_outliers(
+        df_raw,
+        noise_floor=cfg.noise_floor,
+        iqr_factor=cfg.iqr_factor,
+        min_segment_size=cfg.min_segment_size,
+        noise_quantile=cfg.noise_quantile,
+        upper_quantile_cap=cfg.upper_quantile_cap,
+        segment_params=cfg.segment_params,
+    )
+
+    df_demo = df_clean.head(10)
     y_real  = df_demo[_TARGET].to_numpy()
 
     # Prepara input sem target

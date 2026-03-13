@@ -149,7 +149,7 @@ class SyntaxMySQL:
         """
 
     @staticmethod
-    def get_devices_by_units_by_unit_names(unit_names: list[str]) -> str:
+    def fetch_devices_by_unit_names(unit_names: list[str]) -> str:
         """
         Retorna query SQL para obter dispositivos (DUT/DAC) associados a unidades pelo nome.
 

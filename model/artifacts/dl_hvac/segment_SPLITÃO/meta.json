@@ -6,8 +6,6 @@
     "Precipitacao_mm",
     "Velocidade_Vento_kmh",
     "Pressao_Superficial_hPa",
-    "is_dac",
-    "is_dut",
     "trimestre",
     "is_feriado",
     "is_vespera_feriado",
@@ -22,11 +20,11 @@
   "n_meses": 10,
   "n_periodos": 4,
   "metrics": {
-    "MAE": 0.7109006643295288,
-    "RMSE": 0.9508199491124426,
-    "R2": 0.290648877620697,
-    "WMAPE": 10.387855529785156,
-    "Acuracia": 89.61214447021484
+    "MAE": 0.7248948812484741,
+    "RMSE": 0.9595516104402356,
+    "R2": 0.26318466663360596,
+    "WMAPE": 10.615900039672852,
+    "Acuracia": 89.38409996032715
   },
   "train_info": {
     "n_raw": 64390,
@@ -36,7 +34,7 @@
     "n_train": 11881,
     "n_val": 626,
     "n_test": 3127,
-    "n_features_dense": 16,
+    "n_features_dense": 14,
     "n_groups_embedding": 88,
     "n_horas_embedding": 24,
     "n_meses_embedding": 10,

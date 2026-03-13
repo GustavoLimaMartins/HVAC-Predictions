@@ -12,14 +12,15 @@ from pathlib import Path
 from datetime import datetime, date
 
 
-def save_consolidated_consumption(df_direct: pl.DataFrame, df_indirect: pl.DataFrame = None) -> None:
+def save_consolidated_consumption(df_direct: pl.DataFrame, df_indirect: pl.DataFrame = None, append_to_existing: bool = False) -> None:
     """Consolida e salva dados de consumo direto e indireto em CSV. Dados brutos para validação e formatação final para ML.
     
     Args:
         df_direct: DataFrame com dados de consumo direto
         df_indirect: DataFrame opcional com dados de consumo indireto padronizado
+        append_to_existing: Se True, mescla com dados existentes; se False, sobrescreve
     """
-    # Consolida com consumo indireto se disponível
+    # Consolida consumo direto com indireto se disponível
     if df_indirect is not None and df_indirect.shape[0] > 0:
         # Valida esquema antes de concatenar
         print("\n=== VALIDAÇÃO DE ESQUEMA ===")
@@ -38,10 +39,26 @@ def save_consolidated_consumption(df_direct: pl.DataFrame, df_indirect: pl.DataF
     
     print(f"Colunas: {df_consolidated.columns}")
     
+    # Se deve mesclar com dados existentes
+    if append_to_existing:
+        output_path_raw = Path(r'use_case\files\consumption_consolidated.csv')
+        if output_path_raw.exists():
+            print("\n=== MESCLAGEM COM DADOS EXISTENTES ===")
+            try:
+                df_existing = pl.read_csv(str(output_path_raw))
+                print(f"Registros existentes: {df_existing.shape[0]}")
+                
+                # Concatena dados novos com existentes
+                df_consolidated = pl.concat([df_existing, df_consolidated], how='vertical_relaxed')
+                print(f"Registros após mesclagem: {df_consolidated.shape[0]}")
+            except Exception as e:
+                print(f"⚠ Não foi possível ler arquivo existente: {e}")
+                print("  Prosseguindo apenas com novos dados")
+    
     # Salva DataFrame consolidado bruto em CSV
-    output_path_raw = r'use_case\files\consumption_consolidated.csv'
-    df_consolidated.write_csv(output_path_raw)
-    print(f"Arquivo bruto salvo: {output_path_raw}")
+    output_path_raw = Path(r'use_case\files\consumption_consolidated.csv')
+    df_consolidated.write_csv(str(output_path_raw))
+    print(f"\n✓ Arquivo bruto salvo: {output_path_raw}")
     
     # Enriquece com features complementares (estações, clima, grupos regionais)
     print("\n=== ENRIQUECIMENTO COM FEATURES COMPLEMENTARES ===")
@@ -59,9 +76,9 @@ def save_consolidated_consumption(df_direct: pl.DataFrame, df_indirect: pl.DataF
     print(f"Schema final: {df_formatted.schema}")
     
     # Salva DataFrame formatado em CSV
-    output_path_final = r'use_case\files\final_dataframe.csv'
-    df_formatted.write_csv(output_path_final)
-    print(f"Arquivo formatado salvo: {output_path_final}")
+    output_path_final = Path(r'use_case\files\final_dataframe.csv')
+    df_formatted.write_csv(str(output_path_final))
+    print(f"✓ Arquivo formatado salvo: {output_path_final}")
 
 
 if __name__ == "__main__":
@@ -69,7 +86,7 @@ if __name__ == "__main__":
     print("INICIANDO PROCESSAMENTO DE CONSUMO HVAC")
     print("=" * 80)
     
-    csv_path = r'use_case\files\BradescoUnidadesSemAuto.csv'
+    csv_path = r'use_case\files\BradescoUnidadesSemAuto_updated.CSV'
     pg_client = client.DatabaseConnectionClient(db_type=2)
     mysql_client = client.DatabaseConnectionClient(db_type=3)
 
@@ -137,7 +154,34 @@ if __name__ == "__main__":
     # Processa o arquivo CSV de unidades Bradesco
     print("\n[3/10] Carregando dados das unidades...")
     df_units = data_modeling.process_client_units(csv_path, date_auto_name='data_inicio')
-    print(f"✓ {df_units.shape[0]} unidades carregadas")
+    print(f"✓ {df_units.shape[0]} unidades carregadas do arquivo")
+    
+    # Verifica quais unit_ids já foram processados no arquivo consolidado
+    print("\n[3.1/10] Identificando novos unit_ids a processar...")
+    processed_unit_ids = set()
+    
+    if output_path_raw.exists():
+        try:
+            df_consolidated_existing = pl.read_csv(str(output_path_raw))
+            processed_unit_ids = set(df_consolidated_existing['unit_id'].drop_nulls().unique().to_list())
+            print(f"  Unit_ids já processados: {len(processed_unit_ids)}")
+        except Exception as e:
+            print(f"  ⚠ Não foi possível ler arquivo consolidado: {e}")
+    
+    # Filtra apenas novos unit_ids
+    available_unit_ids = set(df_units['unit_id'].drop_nulls().unique().to_list())
+    new_unit_ids = available_unit_ids - processed_unit_ids
+    
+    if new_unit_ids:
+        print(f"  Novos unit_ids a processar: {len(new_unit_ids)}")
+        # Filtra df_units para apenas os novos unit_ids
+        df_units_new = df_units.filter(pl.col('unit_id').is_in(list(new_unit_ids)))
+        print(f"✓ Processamento limitado a {df_units_new.shape[0]} unidades novas")
+        df_units = df_units_new
+    else:
+        print(f"  Nenhum novo unit_id encontrado. Processamento será ignorado.")
+        # Processará novamente todas as unidades para regenerar os dados
+        print(f"  Reprocessando todas as {df_units.shape[0]} unidades...")
 
     # Consulta dispositivos no PostgreSQL
     print("\n[4/10] Consultando dispositivos no PostgreSQL...")
@@ -426,19 +470,19 @@ if __name__ == "__main__":
                         print(f"\n=== VALIDAÇÃO SCHEMA INDIRETO ===")
                         print(f"Schema: {df_indirect_standardized.schema}")
                         
-                        save_consolidated_consumption(df_final, df_indirect_standardized)
+                        save_consolidated_consumption(df_final, df_indirect_standardized, append_to_existing=True)
                     else:
                         print("\n⚠ Nenhum registro indireto após filtros")
-                        save_consolidated_consumption(df_final)
+                        save_consolidated_consumption(df_final, append_to_existing=True)
                 else:
                     print("\n⚠ Nenhum registro indireto encontrado")
-                    save_consolidated_consumption(df_final)
+                    save_consolidated_consumption(df_final, append_to_existing=True)
             else:
                 print("\n⚠ Nenhum dado indireto coletado")
-                save_consolidated_consumption(df_final)
+                save_consolidated_consumption(df_final, append_to_existing=True)
         else:
             print("\n✓ Todos os dispositivos já têm consumo direto")
-            save_consolidated_consumption(df_final)
+            save_consolidated_consumption(df_final, append_to_existing=True)
     else:
         df_final = None
         print("\n✗ ERRO: Nenhum dado de consumo encontrado.")

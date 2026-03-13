@@ -1,21 +1,21 @@
 {
-  "timestamp": "2026-03-11T19:27:21",
+  "timestamp": "2026-03-12T15:05:43",
   "n_segments": 9,
   "consolidated": {
     "n_train": 151047,
     "n_test": 37768,
-    "MAE": 0.396412,
-    "RMSE": 0.511442,
-    "MAPE": 18.240275,
-    "WMAPE": 17.177868,
-    "Acuracia": 81.759725
+    "MAE": 0.396388,
+    "RMSE": 0.51236,
+    "MAPE": 18.223184,
+    "WMAPE": 17.184001,
+    "Acuracia": 81.776816
   },
   "segmented": {
     "AR CONDICIONADO DE JANELA (ACJ)": {
       "best_model": "XGBRegressor",
       "n_train": 1409,
       "n_test": 353,
-      "n_features": 22,
+      "n_features": 20,
       "feature_columns": [
         "grupo_regional",
         "Temperatura_C",
@@ -24,8 +24,6 @@
         "Precipitacao_mm",
         "Velocidade_Vento_kmh",
         "Pressao_Superficial_hPa",
-        "is_dac",
-        "is_dut",
         "trimestre",
         "is_feriado",
         "is_vespera_feriado",
@@ -53,12 +51,12 @@
       },
       "models": {
         "XGBRegressor": {
-          "MAE": 0.171072,
-          "RMSE": 0.240742,
-          "R2": 0.7012,
-          "MAPE": 17.316308,
-          "WMAPE": 14.613802,
-          "Acuracia": 82.683692
+          "MAE": 0.174973,
+          "RMSE": 0.24784,
+          "R2": 0.683322,
+          "MAPE": 17.591548,
+          "WMAPE": 14.947049,
+          "Acuracia": 82.408452
         },
         "LGBMRegressor": {
           "MAE": 0.18738,
@@ -74,7 +72,7 @@
       "best_model": "LGBMRegressor",
       "n_train": 10872,
       "n_test": 2719,
-      "n_features": 23,
+      "n_features": 21,
       "feature_columns": [
         "grupo_regional",
         "Temperatura_C",
@@ -83,8 +81,6 @@
         "Precipitacao_mm",
         "Velocidade_Vento_kmh",
         "Pressao_Superficial_hPa",
-        "is_dac",
-        "is_dut",
         "trimestre",
         "is_feriado",
         "is_vespera_feriado",
@@ -121,12 +117,12 @@
           "Acuracia": 82.215474
         },
         "XGBRegressor": {
-          "MAE": 0.453003,
-          "RMSE": 0.579483,
-          "R2": 0.349126,
-          "MAPE": 17.910683,
-          "WMAPE": 15.765374,
-          "Acuracia": 82.089317
+          "MAE": 0.45217,
+          "RMSE": 0.607656,
+          "R2": 0.284302,
+          "MAPE": 17.865716,
+          "WMAPE": 15.73638,
+          "Acuracia": 82.134284
         }
       }
     },
@@ -134,7 +130,7 @@
       "best_model": "XGBRegressor",
       "n_train": 3006,
       "n_test": 752,
-      "n_features": 23,
+      "n_features": 21,
       "feature_columns": [
         "grupo_regional",
         "Temperatura_C",
@@ -143,8 +139,6 @@
         "Precipitacao_mm",
         "Velocidade_Vento_kmh",
         "Pressao_Superficial_hPa",
-        "is_dac",
-        "is_dut",
         "trimestre",
         "is_feriado",
         "is_vespera_feriado",
@@ -173,12 +167,12 @@
       },
       "models": {
         "XGBRegressor": {
-          "MAE": 0.49635,
-          "RMSE": 0.776512,
-          "R2": 0.563072,
-          "MAPE": 16.093113,
-          "WMAPE": 13.233204,
-          "Acuracia": 83.906887
+          "MAE": 0.502242,
+          "RMSE": 0.780552,
+          "R2": 0.558513,
+          "MAPE": 16.219665,
+          "WMAPE": 13.390297,
+          "Acuracia": 83.780335
         },
         "LGBMRegressor": {
           "MAE": 0.544874,
@@ -194,7 +188,7 @@
       "best_model": "LGBMRegressor",
       "n_train": 67157,
       "n_test": 16790,
-      "n_features": 23,
+      "n_features": 21,
       "feature_columns": [
         "grupo_regional",
         "Temperatura_C",
@@ -203,8 +197,6 @@
         "Precipitacao_mm",
         "Velocidade_Vento_kmh",
         "Pressao_Superficial_hPa",
-        "is_dac",
-        "is_dut",
         "trimestre",
         "is_feriado",
         "is_vespera_feriado",
@@ -241,12 +233,12 @@
           "Acuracia": 82.670918
         },
         "XGBRegressor": {
-          "MAE": 0.205897,
-          "RMSE": 0.262209,
-          "R2": 0.341164,
-          "MAPE": 17.580553,
-          "WMAPE": 17.044046,
-          "Acuracia": 82.419447
+          "MAE": 0.205827,
+          "RMSE": 0.262635,
+          "R2": 0.33902,
+          "MAPE": 17.565663,
+          "WMAPE": 17.038295,
+          "Acuracia": 82.434337
         }
       }
     },
@@ -254,7 +246,7 @@
       "best_model": "LGBMRegressor",
       "n_train": 53525,
       "n_test": 13382,
-      "n_features": 23,
+      "n_features": 21,
       "feature_columns": [
         "grupo_regional",
         "Temperatura_C",
@@ -263,8 +255,6 @@
         "Precipitacao_mm",
         "Velocidade_Vento_kmh",
         "Pressao_Superficial_hPa",
-        "is_dac",
-        "is_dut",
         "trimestre",
         "is_feriado",
         "is_vespera_feriado",
@@ -301,20 +291,20 @@
           "Acuracia": 78.260056
         },
         "XGBRegressor": {
-          "MAE": 0.54076,
-          "RMSE": 0.668973,
-          "R2": 0.208491,
-          "MAPE": 21.928899,
-          "WMAPE": 20.579946,
-          "Acuracia": 78.071101
+          "MAE": 0.540017,
+          "RMSE": 0.668621,
+          "R2": 0.209322,
+          "MAPE": 21.908679,
+          "WMAPE": 20.551678,
+          "Acuracia": 78.091321
         }
       }
     },
     "SPLIT\u00c3O": {
-      "best_model": "LGBMRegressor",
+      "best_model": "XGBRegressor",
       "n_train": 12507,
       "n_test": 3127,
-      "n_features": 23,
+      "n_features": 21,
       "feature_columns": [
         "grupo_regional",
         "Temperatura_C",
@@ -323,8 +313,6 @@
         "Precipitacao_mm",
         "Velocidade_Vento_kmh",
         "Pressao_Superficial_hPa",
-        "is_dac",
-        "is_dut",
         "trimestre",
         "is_feriado",
         "is_vespera_feriado",
@@ -342,39 +330,39 @@
       ],
       "best_params": {
         "subsample": 1.0,
-        "reg_lambda": 0.0,
-        "reg_alpha": 0.1,
-        "num_leaves": 63,
-        "n_estimators": 700,
-        "min_child_samples": 50,
+        "reg_lambda": 2.0,
+        "reg_alpha": 0.0,
+        "n_estimators": 1000,
+        "min_child_weight": 5,
         "max_depth": 10,
-        "learning_rate": 0.01,
+        "learning_rate": 0.05,
+        "gamma": 0.5,
         "colsample_bytree": 0.9
       },
       "models": {
-        "LGBMRegressor": {
-          "MAE": 0.708766,
-          "RMSE": 0.918111,
-          "R2": 0.338614,
-          "MAPE": 10.285435,
-          "WMAPE": 10.356663,
-          "Acuracia": 89.714565
-        },
         "XGBRegressor": {
-          "MAE": 0.718976,
-          "RMSE": 0.942954,
-          "R2": 0.302337,
-          "MAPE": 10.441632,
-          "WMAPE": 10.505856,
-          "Acuracia": 89.558368
+          "MAE": 0.711474,
+          "RMSE": 0.929245,
+          "R2": 0.308993,
+          "MAPE": 10.301403,
+          "WMAPE": 10.419354,
+          "Acuracia": 89.698597
+        },
+        "LGBMRegressor": {
+          "MAE": 0.716002,
+          "RMSE": 0.924045,
+          "R2": 0.316705,
+          "MAPE": 10.364915,
+          "WMAPE": 10.485661,
+          "Acuracia": 89.635085
         }
       }
     },
     "SPLIT\u00c3O INVERTER": {
-      "best_model": "XGBRegressor",
+      "best_model": "LGBMRegressor",
       "n_train": 1677,
       "n_test": 420,
-      "n_features": 22,
+      "n_features": 20,
       "feature_columns": [
         "grupo_regional",
         "Temperatura_C",
@@ -383,8 +371,6 @@
         "Precipitacao_mm",
         "Velocidade_Vento_kmh",
         "Pressao_Superficial_hPa",
-        "is_dac",
-        "is_dut",
         "trimestre",
         "is_feriado",
         "is_vespera_feriado",
@@ -400,32 +386,32 @@
         "periodo_dia_Tarde"
       ],
       "best_params": {
-        "subsample": 1.0,
-        "reg_lambda": 2.0,
-        "reg_alpha": 0.5,
-        "n_estimators": 500,
-        "min_child_weight": 5,
-        "max_depth": 3,
-        "learning_rate": 0.1,
-        "gamma": 0.5,
-        "colsample_bytree": 0.9
+        "subsample": 0.7,
+        "reg_lambda": 0.1,
+        "reg_alpha": 0.1,
+        "num_leaves": 31,
+        "n_estimators": 700,
+        "min_child_samples": 50,
+        "max_depth": 10,
+        "learning_rate": 0.01,
+        "colsample_bytree": 1.0
       },
       "models": {
-        "XGBRegressor": {
-          "MAE": 1.05966,
-          "RMSE": 1.919547,
-          "R2": 0.983985,
-          "MAPE": 17.162298,
-          "WMAPE": 6.100555,
-          "Acuracia": 82.837702
-        },
         "LGBMRegressor": {
-          "MAE": 1.058188,
-          "RMSE": 1.811061,
-          "R2": 0.985744,
-          "MAPE": 17.208621,
-          "WMAPE": 6.092078,
-          "Acuracia": 82.791379
+          "MAE": 1.003576,
+          "RMSE": 1.890493,
+          "R2": 0.984787,
+          "MAPE": 14.768408,
+          "WMAPE": 5.381118,
+          "Acuracia": 85.231592
+        },
+        "XGBRegressor": {
+          "MAE": 1.005216,
+          "RMSE": 1.909485,
+          "R2": 0.98448,
+          "MAPE": 15.077836,
+          "WMAPE": 5.389913,
+          "Acuracia": 84.922164
         }
       }
     },
@@ -433,7 +419,7 @@
       "best_model": "LGBMRegressor",
       "n_train": 204,
       "n_test": 52,
-      "n_features": 21,
+      "n_features": 19,
       "feature_columns": [
         "grupo_regional",
         "Temperatura_C",
@@ -442,8 +428,6 @@
         "Precipitacao_mm",
         "Velocidade_Vento_kmh",
         "Pressao_Superficial_hPa",
-        "is_dac",
-        "is_dut",
         "trimestre",
         "is_feriado",
         "is_vespera_feriado",
@@ -458,40 +442,40 @@
         "periodo_dia_Tarde"
       ],
       "best_params": {
-        "subsample": 0.9,
+        "subsample": 0.8,
         "reg_lambda": 0.5,
-        "reg_alpha": 0.5,
-        "num_leaves": 31,
-        "n_estimators": 700,
+        "reg_alpha": 0.1,
+        "num_leaves": 63,
+        "n_estimators": 1000,
         "min_child_samples": 50,
-        "max_depth": 10,
-        "learning_rate": 0.1,
-        "colsample_bytree": 0.7
+        "max_depth": 30,
+        "learning_rate": 0.01,
+        "colsample_bytree": 0.5
       },
       "models": {
         "LGBMRegressor": {
-          "MAE": 0.609718,
-          "RMSE": 0.849026,
-          "R2": 0.010792,
-          "MAPE": 7.835925,
-          "WMAPE": 7.614515,
-          "Acuracia": 92.164075
+          "MAE": 0.789972,
+          "RMSE": 1.004647,
+          "R2": 0.067528,
+          "MAPE": 10.440612,
+          "WMAPE": 9.976417,
+          "Acuracia": 89.559388
         },
         "XGBRegressor": {
-          "MAE": 0.62095,
-          "RMSE": 0.896852,
-          "R2": -0.103792,
-          "MAPE": 8.128326,
-          "WMAPE": 7.754789,
-          "Acuracia": 91.871674
+          "MAE": 0.801837,
+          "RMSE": 1.045276,
+          "R2": -0.009416,
+          "MAPE": 10.567198,
+          "WMAPE": 10.126259,
+          "Acuracia": 89.432802
         }
       }
     },
     "SPLIT\u00c3O SELF CONTAINED": {
-      "best_model": "LGBMRegressor",
+      "best_model": "XGBRegressor",
       "n_train": 690,
       "n_test": 173,
-      "n_features": 23,
+      "n_features": 21,
       "feature_columns": [
         "grupo_regional",
         "Temperatura_C",
@@ -500,8 +484,6 @@
         "Precipitacao_mm",
         "Velocidade_Vento_kmh",
         "Pressao_Superficial_hPa",
-        "is_dac",
-        "is_dut",
         "trimestre",
         "is_feriado",
         "is_vespera_feriado",
@@ -518,32 +500,32 @@
         "periodo_dia_Tarde"
       ],
       "best_params": {
-        "subsample": 0.9,
-        "reg_lambda": 0.0,
-        "reg_alpha": 0.1,
-        "num_leaves": 31,
+        "subsample": 1.0,
+        "reg_lambda": 0.5,
+        "reg_alpha": 0.5,
         "n_estimators": 300,
-        "min_child_samples": 100,
-        "max_depth": 30,
-        "learning_rate": 0.1,
+        "min_child_weight": 3,
+        "max_depth": 5,
+        "learning_rate": 0.01,
+        "gamma": 0.0,
         "colsample_bytree": 1.0
       },
       "models": {
-        "LGBMRegressor": {
-          "MAE": 0.23191,
-          "RMSE": 0.289338,
-          "R2": 0.172355,
-          "MAPE": 3.875723,
-          "WMAPE": 3.884536,
-          "Acuracia": 96.124277
-        },
         "XGBRegressor": {
-          "MAE": 0.233993,
-          "RMSE": 0.288013,
-          "R2": 0.179915,
-          "MAPE": 3.916524,
-          "WMAPE": 3.919433,
-          "Acuracia": 96.083476
+          "MAE": 0.226119,
+          "RMSE": 0.280137,
+          "R2": 0.272467,
+          "MAPE": 3.773149,
+          "WMAPE": 3.764105,
+          "Acuracia": 96.226851
+        },
+        "LGBMRegressor": {
+          "MAE": 0.232066,
+          "RMSE": 0.28394,
+          "R2": 0.252579,
+          "MAPE": 3.872284,
+          "WMAPE": 3.863107,
+          "Acuracia": 96.127716
         }
       }
     }

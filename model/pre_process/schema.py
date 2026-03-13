@@ -20,8 +20,6 @@ existem no arquivo consolidado:
     Precipitacao_mm                     Precipitacao_mm
     Velocidade_Vento_kmh                Velocidade_Vento_kmh
     Pressao_Superficial_hPa             Pressao_Superficial_hPa
-    is_dac                              is_dac
-    is_dut                              is_dut
                                         ── features de data ──
                                         ano              (ex: 2025)
                                         mes              (1 a 12)
@@ -553,7 +551,6 @@ if __name__ == "__main__":
         "Temperatura_C", "Temperatura_Percebida_C",
         "Umidade_Relativa_%", "Precipitacao_mm",
         "Velocidade_Vento_kmh", "Pressao_Superficial_hPa",
-        "is_dac", "is_dut"
     ]
     schema = ModelSchema(df_raw, schema_fields)
     df_model = schema.build()
@@ -579,7 +576,6 @@ if __name__ == "__main__":
     print(f"\nAmostra — features booleanas e temporais:")
     print(df_model.select([
         "is_feriado", "is_vespera_feriado", "is_dia_util",
-        "is_dac", "is_dut",
     ]).head(10))
 
     print(f"\nAmostra — variável alvo e tipo de máquina padronizado:")

@@ -12,11 +12,10 @@ Toda a conversão de inputs é delegada ao módulo ``tools/normalizer.py``
 ``MLPipeline._build_schema()`` + Target Encoding + alinhamento + sanitização
 — sem duplicar lógica.
 
-Schema inicial esperado (13 colunas, sem ``consumo_kwh``):
+Schema inicial esperado (11 colunas, sem ``consumo_kwh``):
     hora, data, machine_type, estacao, grupo_regional,
     Temperatura_C, Temperatura_Percebida_C, Umidade_Relativa_%,
-    Precipitacao_mm, Velocidade_Vento_kmh, Pressao_Superficial_hPa,
-    is_dac, is_dut
+    Precipitacao_mm, Velocidade_Vento_kmh, Pressao_Superficial_hPa
 
 Uso rápido:
     >>> from testing.ml_models import predict_ml, list_segments
@@ -60,7 +59,6 @@ _INPUT_FIELDS: list[str] = [
     "Temperatura_C", "Temperatura_Percebida_C",
     "Umidade_Relativa_%", "Precipitacao_mm",
     "Velocidade_Vento_kmh", "Pressao_Superficial_hPa",
-    "is_dac", "is_dut",
 ]
 
 _ROOT = Path(__file__).resolve().parent.parent
@@ -158,8 +156,7 @@ def predict_ml(
         Dados de entrada no schema inicial:
             hora, data, machine_type, estacao, grupo_regional,
             Temperatura_C, Temperatura_Percebida_C, Umidade_Relativa_%,
-            Precipitacao_mm, Velocidade_Vento_kmh, Pressao_Superficial_hPa,
-            is_dac, is_dut
+            Precipitacao_mm, Velocidade_Vento_kmh, Pressao_Superficial_hPa
     segment : str | None
         Nome do segmento (``tipo_maquina`` normalizado) para predição
         segmentada. Se ``None``, retorna apenas a predição global.

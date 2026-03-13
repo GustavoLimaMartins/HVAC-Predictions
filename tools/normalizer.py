@@ -2,16 +2,23 @@
 Normalizer — Módulo único de normalização para inferência DL e ML
 =================================================================
 
-Converte dados no **schema inicial** (13 features brutas, sem target)
-para o formato exato usado no treinamento, eliminando duplicação de
+Converte dados no **schema inicial** (11 features brutas com latitude/longitude,
+sem target) para o formato exato usado no treinamento, eliminando duplicação de
 lógica entre ``DLPipeline.predict()``, ``tools/dl_pred.py`` e
 ``testing/dl_model.py``.
 
+**MUDANÇA IMPORTANTE (Message 13):** grupo_regional é agora derivado AUTOMATICAMENTE
+a partir de latitude/longitude usando o arquivo geo_reference.parquet (mapa DBSCAN
+do treinamento com BallTree Haversine KNN-1 para lookup). Não é aceito como input.
+
 Fluxo:
 
-    dados brutos (13 cols)
+    dados brutos (11 cols: hora, data, lat, lon, machine_type, clima)
         │
         ├─ DLNormalizer.transform(df)
+        │       0. FeatureDeriver.derive()
+        │          ├─ Derivação de features de data (ano, mes, trimestre, etc)
+        │          └─ Derivação de grupo_regional via BallTree KNN-1 (lat/lon → geo_reference.parquet)
         │       1. Insere dummy target (0.0)
         │       2. Extrai hora, mes, grupo_regional, periodo_dia brutos (Int32)
         │       3. ModelSchema.build()  → OHE, Clipping+MinMax, date features
@@ -23,6 +30,9 @@ Fluxo:
         │       └─ Retorna dict pronto para model.predict()
         │
         └─ MLNormalizer.transform(df)
+                0. FeatureDeriver.derive()
+                   ├─ Derivação de features de data (ano, mes, trimestre, etc)
+                   └─ Derivação de grupo_regional via BallTree KNN-1 (lat/lon → geo_reference.parquet)
                 1. Insere dummy target (0.0)
                 2. ModelSchema.build()  → OHE, Clipping+MinMax, date features,
                    Target Encoding, Categorical encoding
@@ -32,16 +42,18 @@ Fluxo:
 
 Uso:
 
-    >>> from model.normalizer import DLNormalizer, MLNormalizer
+    >>> from tools.normalizer import DLNormalizer, MLNormalizer
     >>>
     >>> # Deep Learning
     >>> norm = DLNormalizer.from_artifact("model/artifacts/dl_hvac/global")
     >>> inputs = norm.transform(df_raw)          # dict p/ model.predict()
+    >>>                                           # df_raw REQUER: latitude, longitude
     >>> preds  = model.predict(inputs, verbose=0).flatten()
     >>>
     >>> # Machine Learning
     >>> norm = MLNormalizer.from_artifact("model/artifacts/ml_hvac/global")
     >>> X = norm.transform(df_raw)               # np.ndarray
+    >>>                                          # df_raw REQUER: latitude, longitude
     >>> preds = pipeline.predict(X)
 """
 
@@ -55,6 +67,7 @@ from pathlib import Path
 
 import numpy as np
 import polars as pl
+from sklearn.neighbors import BallTree
 
 _ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_ROOT))
@@ -71,11 +84,197 @@ _SCHEMA_FIELDS: list[str] = [
     "Temperatura_C", "Temperatura_Percebida_C",
     "Umidade_Relativa_%", "Precipitacao_mm",
     "Velocidade_Vento_kmh", "Pressao_Superficial_hPa",
-    "is_dac", "is_dut",
 ]
 
 # Colunas de Entity Embedding no DL (ordem fixa)
 _EMB_COLS: list[str] = ["grupo_regional", "hora", "mes", "periodo_dia"]
+
+# Caminho do artefato geográfico (mapa de coordenadas únicas → grupo_regional)
+_GEO_REF_PATH = _ROOT / "use_case" / "files" / "geo_reference.parquet"
+
+# Cache do lookup geográfico (BallTree + labels carregados do artefato)
+_geo_tree: BallTree | None = None
+_geo_labels: np.ndarray | None = None
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  FEATURE DERIVER — Reaproveita ModelSchema + geo_reference.parquet
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _get_geo_lookup() -> tuple[BallTree, np.ndarray]:
+    """
+    Carrega o artefato ``geo_reference.parquet`` (gerado pelo DBSCAN
+    no treinamento) e devolve um ``BallTree`` Haversine + vetor de labels.
+
+    O artefato contém as coordenadas únicas de treinamento já
+    rotuladas com ``grupo_regional``. Na inferência basta localizar
+    o vizinho mais próximo via KNN-1 Haversine — nenhum re-treinamento ocorre.
+    
+    Returns:
+        tuple[BallTree, np.ndarray]: (tree, labels)
+        
+    Raises:
+        FileNotFoundError: Se geo_reference.parquet não existe
+    """
+    global _geo_tree, _geo_labels
+    if _geo_tree is not None:
+        return _geo_tree, _geo_labels  # type: ignore[return-value]
+
+    if not _GEO_REF_PATH.exists():
+        raise FileNotFoundError(
+            f"Artefato de referência geográfica não encontrado:\n"
+            f"  {_GEO_REF_PATH}\n"
+            f"Execute o pipeline de treinamento primeiro para gerar geo_reference.parquet"
+        )
+
+    _logger.info("Carregando referência geográfica de %s ...", _GEO_REF_PATH.name)
+    ref = pl.read_parquet(_GEO_REF_PATH)
+    coords_rad = np.radians(ref.select(["latitude", "longitude"]).to_numpy())
+    _geo_labels = ref["grupo_regional"].to_numpy()
+    _geo_tree = BallTree(coords_rad, metric="haversine")
+    return _geo_tree, _geo_labels
+
+
+def _assign_grupo_regional_knn(df: pl.DataFrame) -> pl.DataFrame:
+    """
+    Atribui ``grupo_regional`` a cada linha via KNN-1 Haversine sobre
+    as coordenadas de referência do treinamento (geo_reference.parquet).
+
+    • Linhas com lat/lon nulos recebem ``null``.
+    • Coordenadas já conhecidas retornam o rótulo exato do treino.
+    • Coordenadas novas recebem o grupo do vizinho mais próximo.
+    
+    Args:
+        df: DataFrame com colunas 'latitude' e 'longitude'
+        
+    Returns:
+        DataFrame com coluna 'grupo_regional' adicionada (Int32)
+    """
+    tree, labels = _get_geo_lookup()
+
+    lats = df["latitude"].to_list()
+    lons = df["longitude"].to_list()
+
+    result: list[int | None] = []
+    query_idxs: list[int] = []
+    query_coords: list[tuple[float, float]] = []
+
+    for i, (lat, lon) in enumerate(zip(lats, lons)):
+        if lat is None or lon is None:
+            result.append(None)
+        else:
+            result.append(None)  # placeholder
+            query_idxs.append(i)
+            query_coords.append((lat, lon))
+
+    # Lookup em batch: converte para radianos e consulta BallTree
+    if query_idxs:
+        coords_rad = np.radians(np.array(query_coords))
+        _, indices = tree.query(coords_rad, k=1)
+        for idx, ref_idx in zip(query_idxs, indices.ravel()):
+            result[idx] = int(labels[ref_idx])
+
+    return df.with_columns(
+        pl.Series("grupo_regional", result, dtype=pl.Int32)
+    )
+
+
+class FeatureDeriver:
+    """
+    Reaproveita ModelSchema.add_date_features() + geo_reference.parquet para auto-derivar features.
+    
+    Delega a ModelSchema a responsabilidade de derivar features de data e usa
+    o artefato geo_reference.parquet (gerado no treinamento via DBSCAN) para
+    derivar grupo_regional de coordenadas via KNN-1 Haversine.
+    
+    **Features derivadas automaticamente:**
+        1. ano, mes, dia          ← De 'data'
+        2. trimestre              ← De mes (Q1-Q4)
+        3. periodo_dia            ← De hora (Madrugada/Manhã/Tarde/Noite)
+        4. is_feriado             ← De data (calendário BR)
+        5. is_vespera_feriado     ← De data
+        6. is_dia_util            ← De weekday + feriado
+        7. estacao                ← De mes (Verão/Outono/Inverno/Primavera)
+        8. grupo_regional         ← De latitude/longitude via BallTree Haversine KNN-1
+    
+    **Observação:** grupo_regional é derivado via lookup de coordenadas geográficas
+    usando o mapa pré-computado no treinamento (geo_reference.parquet). 
+    Requer coordenadas válidas no input.
+    
+    Uso:
+        >>> df = pl.read_csv("data.csv")
+        >>> df = FeatureDeriver.derive(df)  # Precisa de: data, hora, latitude, longitude, machine_type, clima
+        >>> # Agora df contém todas as features derivadas
+    """
+    
+    @staticmethod
+    def derive(df: pl.DataFrame) -> pl.DataFrame:
+        """
+        Auto-deriva features usando ModelSchema.add_date_features() + geo lookup.
+        
+        Reusa a lógica centralizada de ModelSchema para derivar features de data,
+        e o artefato geo_reference.parquet para derivar grupo_regional a partir 
+        de coordenadas via KNN-1 Haversine.
+        
+        Args:
+            df: DataFrame com as features de input (hora, data, latitude, longitude, 
+                machine_type, clima, etc). Requer 'latitude' e 'longitude'.
+        
+        Returns:
+            DataFrame com as features derivadas de data e geográficas adicionadas
+            
+        Raises:
+            ValueError: Se latitude/longitude não estão presentes no DataFrame
+            FileNotFoundError: Se geo_reference.parquet não existe
+        """
+        # Valida presença de coordenadas
+        if "latitude" not in df.columns or "longitude" not in df.columns:
+            raise ValueError(
+                "FeatureDeriver.derive() requer colunas 'latitude' e 'longitude' "
+                "para derivar grupo_regional via lookup geográfico"
+            )
+        
+        # Normaliza nome de coluna: tipo_maquina → machine_type se necessário
+        if "tipo_maquina" in df.columns and "machine_type" not in df.columns:
+            df = df.rename({"tipo_maquina": "machine_type"})
+        
+        # Insere dummy target (obrigatório para ModelSchema)
+        if "consumo_kwh" not in df.columns:
+            df = df.with_columns(pl.lit(0.0).alias("consumo_kwh"))
+        
+        # ── Deriva features de DATA ──────────────────────────────────────
+        # Delega derivação de features de data ao ModelSchema
+        schema = ModelSchema.__new__(ModelSchema)
+        schema.df = df.clone()
+        schema._schema_fields = []
+        
+        # Chama add_date_features() para derivar: mes, trimestre, 
+        # is_feriado, is_vespera_feriado, is_dia_util, periodo_dia
+        schema.add_date_features()
+        df = schema.df
+        
+        # Adiciona estacao (derivada de mes, não é feita por ModelSchema)
+        # Mapeamento: Verão (12,1,2), Outono (3,4,5), Inverno (6,7,8), Primavera (9,10,11)
+        df = df.with_columns(
+            pl.when(pl.col("mes").is_in([12, 1, 2]))
+              .then(pl.lit("verao"))
+              .when(pl.col("mes").is_in([3, 4, 5]))
+              .then(pl.lit("outono"))
+              .when(pl.col("mes").is_in([6, 7, 8]))
+              .then(pl.lit("inverno"))
+              .when(pl.col("mes").is_in([9, 10, 11]))
+              .then(pl.lit("primavera"))
+              .otherwise(pl.lit("desconhecida"))
+              .alias("estacao")
+        )
+        
+        # ── Deriva GRUPO REGIONAL via BallTree Haversine KNN-1 ──────────
+        # Reaproveita geo_reference.parquet (gerado no treinamento)
+        df = _assign_grupo_regional_knn(df)
+        
+        return df
+
+
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -172,6 +371,7 @@ class DLNormalizer:
         Converte DataFrame bruto no dict de inputs do modelo .keras.
 
         Pipeline:
+            0. Derive features (ano, mes, dia, estacao, grupo_regional via lat/lng, etc) se ausentes
             1. Insere dummy target (0.0) se ausente
             2. Extrai hora, mes, grupo_regional, periodo_dia brutos (Int32)
             3. ModelSchema.build() → OHE, Clipping+MinMax, date features
@@ -182,7 +382,12 @@ class DLNormalizer:
             8. Separa X_emb + X_dense
 
         Args:
-            df: DataFrame com 13 colunas brutas (sem consumo_kwh).
+            df: DataFrame com 11 features de input: hora, data, latitude, longitude, 
+                machine_type, Temperatura_*, Umidade_*, Precipitacao_*, Velocidade_*, Pressao_*.
+                
+                **NOTA IMPORTANTE:** Requer 'latitude' e 'longitude' para derivar 
+                'grupo_regional' via lookup geográfico (BallTree Haversine). 
+                Não aceita 'grupo_regional' pré-computado.
 
         Returns:
             dict com chaves:
@@ -192,11 +397,20 @@ class DLNormalizer:
                 - ``"periodo_dia"``    : int32 (n, 1)
                 - ``"dense_features"`` : float32 (n, d)
         """
+        # ── 0. Auto-deriva features ausentes ─────────────────────────────
+        df = FeatureDeriver.derive(df)
+        
+        # ── 0b. Renomeia tipo_maquina → machine_type para ModelSchema ──
+        if "tipo_maquina" in df.columns and "machine_type" not in df.columns:
+            df = df.rename({"tipo_maquina": "machine_type"})
+        
         df = _ensure_target(df)
 
         # ── 1. Extrai valores brutos para Entity Embeddings ──────────────
         hora_arr  = df["hora"].to_numpy().astype(np.int32)
-        mes_arr   = df["data"].cast(pl.Date).dt.month().to_numpy().astype(np.int32)
+        
+        # mes já foi derivado por FeatureDeriver, não precisa acessar data
+        mes_arr   = df["mes"].to_numpy().astype(np.int32)
         grupo_arr = df["grupo_regional"].to_numpy().astype(np.int32)
 
         periodo_arr = np.where(
@@ -205,8 +419,28 @@ class DLNormalizer:
                      np.where(hora_arr <= 18, 2, 3)),
         ).astype(np.int32)
 
-        # ── 2. ModelSchema.build() completo ──────────────────────────────
-        df_ml = ModelSchema(df, _SCHEMA_FIELDS).build()
+        # ── 2. ModelSchema: transformações pós-derivação ──────────────────
+        # Apenas aplicamos: adjust_machine_type, categorical, OHE, clipping+minmax
+        
+        # Cria schema_fields sem 'data' (já foi removida por add_date_features)
+        schema_fields_no_data = [f for f in _SCHEMA_FIELDS if f != "data"]
+        
+        # Cria schema temporário para usar métodos de transformação
+        schema = ModelSchema.__new__(ModelSchema)
+        schema.df = df.clone()
+        schema._schema_fields = schema_fields_no_data
+        
+        # Aplica transformações (sem add_date_features() que precisa de 'data')
+        schema.adjust_machine_type()
+        schema.make_categorical_columns(["grupo_regional"])
+        schema.make_one_hot_encode_columns(["tipo_maquina", "estacao", "periodo_dia"])
+        schema.make_clipping_min_max_columns([
+            "Temperatura_C", "Temperatura_Percebida_C",
+            "Umidade_Relativa_%", "Precipitacao_mm",
+            "Velocidade_Vento_kmh", "Pressao_Superficial_hPa",
+        ])
+        
+        df_ml = schema.df
 
         # ── 3. Remove artefatos incompatíveis com DL ─────────────────────
         periodo_ohe = [c for c in df_ml.columns if c.startswith("periodo_dia_")]
@@ -390,20 +624,32 @@ class MLNormalizer:
         Converte DataFrame bruto no array numpy pronto para predict().
 
         Pipeline (replica ``MLPipeline._build_schema(inference=True)``):
-            1. Insere dummy target (0.0) se ausente
-            2. add_date_features → adjust_machine_type
-            3. Target Encoding de hora e mes (usando mapa do treino)
-            4. make_categorical_columns, make_one_hot_encode_columns
-            5. make_clipping_min_max_columns
-            6. Sanitiza NaN/inf → 0.0
-            7. Alinha colunas com feature_columns_ do treino
+            1. Auto-deriva features (ano, mes, dia, estacao, grupo_regional via lat/lng)
+            2. Insere dummy target (0.0) se ausente
+            3. add_date_features → adjust_machine_type
+            4. Target Encoding de hora e mes (usando mapa do treino)
+            5. make_categorical_columns, make_one_hot_encode_columns
+            6. make_clipping_min_max_columns
+            7. Sanitiza NaN/inf → 0.0
+            8. Alinha colunas com feature_columns_ do treino
 
         Args:
-            df: DataFrame com 13 colunas brutas (sem consumo_kwh).
+            df: DataFrame com 11 features de input (hora, data, latitude, longitude, 
+                machine_type, Temperatura_*, Umidade_*, Precipitacao_*, Velocidade_*, Pressao_*).
+                
+                **NOTA IMPORTANTE:** Requer 'latitude' e 'longitude' para derivar 
+                'grupo_regional' via lookup geográfico (BallTree Haversine).
 
         Returns:
             np.ndarray float32 (n, d) pronto para model.predict().
         """
+        # ── 0. Auto-deriva features ausentes ─────────────────────────────
+        df = FeatureDeriver.derive(df)
+        
+        # ── 0b. Renomeia tipo_maquina → machine_type para ModelSchema ──
+        if "tipo_maquina" in df.columns and "machine_type" not in df.columns:
+            df = df.rename({"tipo_maquina": "machine_type"})
+        
         df = _ensure_target(df)
 
         # ── 1. Resolve colunas de Target Encoding ────────────────────────
@@ -413,9 +659,18 @@ class MLNormalizer:
             if c.endswith("_target_enc")
         ]
 
-        # ── 2. Replica o fluxo de MLPipeline._build_schema(inference) ───
-        schema = ModelSchema(df, _SCHEMA_FIELDS)
-        schema.add_date_features()
+        # ── 2. ModelSchema: transformações pós-derivação ──────────────────
+        # Em inferência, as features de data já foram derivadas por FeatureDeriver.
+        # Apenas aplicamos: adjust_machine_type, TE, categorical, OHE, clipping+minmax
+        
+        # Cria schema_fields sem 'data' (já foi removida por add_date_features)
+        schema_fields_no_data = [f for f in _SCHEMA_FIELDS if f != "data"]
+        
+        # Cria schema temporário para usar métodos de transformação
+        schema = ModelSchema.__new__(ModelSchema)
+        schema.df = df.clone()
+        schema._schema_fields = schema_fields_no_data
+        
         schema.adjust_machine_type()
 
         # ── 3. Target Encoding (antes de OHE, na mesma ordem do treino) ──
@@ -599,14 +854,14 @@ if __name__ == "__main__":
     # ── Tabela 1 — Valores brutos originais ──────────────────────────────
     print(f"\n  ┌─ TABELA 1: Valores brutos (CSV original)")
     print(f"  │")
-    header_nums = "  {:>3s}  {:>5s}  {:>6s}  {:>8s}  {:>8s}  {:>6s}  {:>6s}  {:>7s}  {:>8s}  {:>5s}  {:>5s}".format(
-        "#", "hora", "g.reg", "Temp_C", "Tp_C", "UR_%", "Prec", "Vento", "Pressao", "dac", "dut",
+    header_nums = "  {:>3s}  {:>5s}  {:>6s}  {:>8s}  {:>8s}  {:>6s}  {:>6s}  {:>7s}  {:>8s}".format(
+        "#", "hora", "g.reg", "Temp_C", "Tp_C", "UR_%", "Prec", "Vento", "Pressao",
     )
     print(header_nums)
     print("  " + "-" * (len(header_nums) - 2))
     for i in range(len(first10)):
         row = first10.row(i, named=True)
-        print("  {:>3d}  {:>5d}  {:>6d}  {:>8.2f}  {:>8.2f}  {:>6.1f}  {:>6.1f}  {:>7.1f}  {:>8.1f}  {:>5d}  {:>5d}".format(
+        print("  {:>3d}  {:>5d}  {:>6d}  {:>8.2f}  {:>8.2f}  {:>6.1f}  {:>6.1f}  {:>7.1f}  {:>8.1f}".format(
             i + 1,
             int(row["hora"]),
             int(row["grupo_regional"]),
@@ -616,8 +871,6 @@ if __name__ == "__main__":
             float(row["Precipitacao_mm"]),
             float(row["Velocidade_Vento_kmh"]),
             float(row["Pressao_Superficial_hPa"]),
-            int(row["is_dac"]),
-            int(row["is_dut"]),
         ))
 
     print(f"\n  {'#':>3s}  {'machine_type':30s}  {'estacao':12s}  {'data':12s}  {'consumo_kwh':>12s}")
