@@ -32,19 +32,6 @@ FastAPI server que expõe endpoints para predições com normalização automát
     ...     "irradiancia_difusa_wm2": 180.0
     ...   }'
 
-**Cliente Python — Railway:**
-    >>> import requests
-    >>> BASE = "https://SEU-DOMINIO.up.railway.app"
-    >>> resp = requests.post(f"{BASE}/predict", json={
-    ...     "hora": 14, "data": "2025-07-03", "machine_type": "splitao",
-    ...     "latitude": -23.88, "longitude": -46.42,
-    ...     "temperatura_c": 25.7, "temperatura_percebida_c": 24.9,
-    ...     "umidade_relativa_pct": 57.0, "precipitacao_mm": 0.0,
-    ...     "velocidade_vento_kmh": 21.4, "pressao_superficial_hpa": 969.8,
-    ...     "irradiancia_direta_wm2": 520.0, "irradiancia_difusa_wm2": 180.0,
-    ... })
-    >>> print(resp.json())   # {"consumo_kwh": 6.32, "timestamp": "..."}
-
 **Documentação Interativa:**
     - Swagger UI: https://SEU-DOMINIO.up.railway.app/docs
     - ReDoc:      https://SEU-DOMINIO.up.railway.app/redoc
@@ -52,12 +39,17 @@ FastAPI server que expõe endpoints para predições com normalização automát
 
 import logging
 import os
+import sys
+import threading
+import time
+import uuid
+from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
 import polars as pl
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI, HTTPException, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -68,18 +60,102 @@ except ImportError:
     from tools.inference_runner import HVACDLInferenceAPI
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  CONFIGURAÇÃO
+#  CONFIGURAÇÃO DE LOGGING
 # ══════════════════════════════════════════════════════════════════════════════
 
-_logger = logging.getLogger(__name__)
+# JSON estruturado para Railway — facilita busca e correlação nos logs
+_LOG_FORMAT = (
+    '{"ts":"%(asctime)s","level":"%(levelname)s","logger":"%(name)s","msg":"%(message)s"}'
+)
+
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s [%(levelname)-8s] %(message)s",
-    datefmt="%H:%M:%S",
+    format=_LOG_FORMAT,
+    datefmt="%Y-%m-%dT%H:%M:%S",
+    stream=sys.stdout,          # Railway captura stdout
+    force=True,                 # Sobrescreve config anterior (ex: uvicorn)
 )
+
+_logger = logging.getLogger("hvac_api")
 
 # Porta injetada pelo Railway em produção; fallback local para 8000
 _PORT = int(os.environ.get("PORT", 8000))
+
+# Caminhos de artefatos
+_ROOT = Path(__file__).resolve().parent.parent
+_ARTIFACT_PATH = _ROOT / "model" / "artifacts" / "dl_hvac" / "global"
+
+_inference_api: Optional[HVACDLInferenceAPI] = None
+_model_load_error: Optional[str] = None
+_model_loading: bool = False
+
+
+def _load_model_sync():
+    """
+    Carrega o modelo em thread separada para não bloquear o lifespan.
+    Assim o servidor inicia imediatamente e Railway consegue bater /health.
+    """
+    global _inference_api, _model_load_error, _model_loading
+    _model_loading = True
+
+    _logger.info("Iniciando carregamento do modelo em background thread...")
+
+    if not _ARTIFACT_PATH.exists():
+        _model_load_error = f"Artifact path não existe: {_ARTIFACT_PATH}"
+        _logger.error(_model_load_error)
+        model_dir = _ROOT / "model"
+        if model_dir.exists():
+            for p in sorted(model_dir.rglob("*"))[:20]:
+                _logger.error(f"  {p.relative_to(_ROOT)}")
+        _model_loading = False
+        return
+
+    t0 = time.perf_counter()
+    try:
+        _inference_api = HVACDLInferenceAPI(_ARTIFACT_PATH)
+        elapsed = time.perf_counter() - t0
+        _logger.info(f"Modelo carregado com sucesso em {elapsed:.2f}s")
+    except Exception as e:
+        _model_load_error = str(e)
+        _logger.error(f"Erro ao carregar modelo: {e}", exc_info=True)
+    finally:
+        _model_loading = False
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  LIFESPAN (substitui @app.on_event deprecated)
+# ══════════════════════════════════════════════════════════════════════════════
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    Gerencia startup e shutdown da aplicação.
+
+    O carregamento do modelo roda em background thread para que o servidor
+    comece a aceitar requisições imediatamente. Isso é essencial para o
+    Railway, que precisa de HTTP 200 em /health dentro da janela de timeout.
+    """
+    # ── Startup ───────────────────────────────────────────────────────────
+    _logger.info("=== STARTUP INICIANDO ===")
+    _logger.info(f"PORT={_PORT} | PID={os.getpid()} | artifact_path={_ARTIFACT_PATH}")
+
+    # Inicia carregamento do modelo em background — não bloqueia o servidor
+    loader_thread = threading.Thread(target=_load_model_sync, daemon=True)
+    loader_thread.start()
+
+    _logger.info("=== SERVIDOR HTTP PRONTO — modelo carregando em background ===")
+
+    yield  # ── Aplicação rodando (modelo pode ainda estar carregando) ──
+
+    # ── Shutdown ──────────────────────────────────────────────────────────
+    _logger.info("=== SHUTDOWN — recebido sinal de parada ===")
+    _inference_api = None
+    _logger.info("=== SHUTDOWN COMPLETO ===")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  APP FASTAPI
+# ══════════════════════════════════════════════════════════════════════════════
 
 app = FastAPI(
     title="HVAC Predictions API",
@@ -88,6 +164,7 @@ app = FastAPI(
     docs_url="/docs",
     redoc_url="/redoc",
     openapi_url="/openapi.json",
+    lifespan=lifespan,
 )
 
 # CORS — permite requisições do domínio Railway e de clientes externos
@@ -98,11 +175,47 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Inicializa a API de inferência (carregada uma única vez)
-_ROOT = Path(__file__).resolve().parent.parent
-_ARTIFACT_PATH = _ROOT / "model" / "artifacts" / "dl_hvac" / "global"
 
-_inference_api: Optional[HVACDLInferenceAPI] = None
+# ══════════════════════════════════════════════════════════════════════════════
+#  MIDDLEWARE — Request ID + Logging end-to-end
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.middleware("http")
+async def request_logging_middleware(request: Request, call_next) -> Response:
+    """
+    Atribui um request_id único a cada requisição e loga entrada/saída
+    com tempo de resposta. Permite rastrear requisições end-to-end no Railway.
+    """
+    request_id = request.headers.get("X-Request-ID", uuid.uuid4().hex[:12])
+    request.state.request_id = request_id
+
+    method = request.method
+    path = request.url.path
+    client = request.client.host if request.client else "unknown"
+
+    _logger.info(f"[{request_id}] >>> {method} {path} | client={client}")
+
+    t0 = time.perf_counter()
+    try:
+        response = await call_next(request)
+    except Exception as exc:
+        elapsed_ms = (time.perf_counter() - t0) * 1000
+        _logger.error(
+            f"[{request_id}] !!! {method} {path} | "
+            f"exception={type(exc).__name__}: {exc} | {elapsed_ms:.1f}ms"
+        )
+        raise
+
+    elapsed_ms = (time.perf_counter() - t0) * 1000
+    response.headers["X-Request-ID"] = request_id
+
+    log_fn = _logger.info if response.status_code < 400 else _logger.warning
+    log_fn(
+        f"[{request_id}] <<< {method} {path} | "
+        f"status={response.status_code} | {elapsed_ms:.1f}ms"
+    )
+
+    return response
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -111,7 +224,7 @@ _inference_api: Optional[HVACDLInferenceAPI] = None
 
 class PredictionRequest(BaseModel):
     """Requisição de predição para um único registro."""
-    
+
     hora: int = Field(..., ge=0, le=23, description="Hora do dia (0-23)")
     data: str = Field(..., description="Data no formato YYYY-MM-DD")
     machine_type: str = Field(..., description="Tipo de máquina (ex: splitao, split_hi-wall)")
@@ -148,20 +261,20 @@ class PredictionRequest(BaseModel):
 
 class BatchPredictionRequest(BaseModel):
     """Requisição de predição em lote."""
-    
+
     records: list[PredictionRequest] = Field(..., description="Lista de registros para predição")
 
 
 class PredictionResponse(BaseModel):
     """Resposta de predição."""
-    
+
     consumo_kwh: float = Field(..., description="Consumo previsto em kWh")
     timestamp: str = Field(..., description="Timestamp da predição (ISO 8601)")
 
 
 class BatchPredictionResponse(BaseModel):
     """Resposta de predição em lote."""
-    
+
     predictions: list[float] = Field(..., description="Lista de predições em kWh")
     n_records: int = Field(..., description="Número de registros processados")
     timestamp: str = Field(..., description="Timestamp da predição (ISO 8601)")
@@ -169,41 +282,18 @@ class BatchPredictionResponse(BaseModel):
 
 class HealthResponse(BaseModel):
     """Resposta de health check."""
-    
-    status: str = Field(..., description="Status do serviço")
+
+    status: str = Field(..., description="Status do serviço: healthy | loading | error")
     artifact_path: str = Field(..., description="Caminho do artefato carregado")
     model_loaded: bool = Field(..., description="Se o modelo está carregado")
+    detail: Optional[str] = Field(None, description="Detalhes adicionais (erro, etc)")
 
 
 class ErrorResponse(BaseModel):
     """Resposta de erro."""
-    
+
     error: str = Field(..., description="Mensagem de erro")
     detail: Optional[str] = Field(None, description="Detalhes adicionais")
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-#  INICIALIZAÇÃO
-# ══════════════════════════════════════════════════════════════════════════════
-
-@app.on_event("startup")
-async def startup_event():
-    """Carrega o modelo ao iniciar o servidor."""
-    global _inference_api
-    
-    try:
-        _logger.info(f"Carregando artefato de {_ARTIFACT_PATH} ...")
-        _inference_api = HVACDLInferenceAPI(_ARTIFACT_PATH)
-        _logger.info("✔ Modelo carregado com sucesso")
-    except Exception as e:
-        _logger.error(f"✗ Erro ao carregar modelo: {e}")
-        raise
-
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    """Cleanup ao desligar o servidor."""
-    _logger.info("Desligando servidor...")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -214,14 +304,33 @@ async def shutdown_event():
 async def health_check():
     """
     Health check — verifica se o serviço está operacional.
-    
-    Returns:
-        HealthResponse com status do serviço
+    Railway usa este endpoint para validar o deploy (configurado em railway.json).
+
+    Retorna HTTP 200 quando modelo está carregado OU ainda carregando
+    (Railway precisa de 200 para considerar o deploy saudável).
+    Retorna HTTP 503 apenas se o carregamento falhou com erro.
     """
+    if _model_load_error and _inference_api is None:
+        _logger.warning(f"Health check: ERROR — {_model_load_error}")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Modelo falhou ao carregar: {_model_load_error}",
+        )
+
+    if _model_loading:
+        _logger.info("Health check: modelo ainda carregando...")
+        return HealthResponse(
+            status="loading",
+            artifact_path=str(_ARTIFACT_PATH),
+            model_loaded=False,
+            detail="Modelo carregando em background",
+        )
+
+    _logger.info("Health check: healthy")
     return HealthResponse(
-        status="healthy" if _inference_api is not None else "unhealthy",
+        status="healthy",
         artifact_path=str(_ARTIFACT_PATH),
-        model_loaded=_inference_api is not None,
+        model_loaded=True,
     )
 
 
@@ -234,25 +343,30 @@ async def health_check():
     },
     tags=["Prediction"],
 )
-async def predict_single(request: PredictionRequest):
+async def predict_single(request: PredictionRequest, raw_request: Request):
     """
     Realiza predição para um único registro.
-    
+
     Args:
         request: Dados de entrada com as 13 features obrigatórias
-        
+
     Returns:
         PredictionResponse com consumo previsto em kWh
-        
-    Raises:
-        HTTPException: Se houver erro na predição
     """
+    rid = getattr(raw_request.state, "request_id", "no-id")
+
     if _inference_api is None:
+        _logger.error(f"[{rid}] predict_single: modelo não carregado")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Modelo não carregado",
         )
-    
+
+    _logger.info(
+        f"[{rid}] predict_single: hora={request.hora} data={request.data} "
+        f"machine_type={request.machine_type!r}"
+    )
+
     try:
         # Cria DataFrame a partir da requisição
         df = pl.DataFrame({
@@ -270,22 +384,32 @@ async def predict_single(request: PredictionRequest):
             "Irradiancia_Direta_Wm2": [request.irradiancia_direta_wm2],
             "Irradiancia_Difusa_Wm2": [request.irradiancia_difusa_wm2],
         }).with_columns(pl.col("data").cast(pl.Date))
-        
-        # Prediz
+
+        _logger.info(f"[{rid}] DataFrame criado, executando inferência...")
+
+        t0 = time.perf_counter()
         pred = _inference_api.predict(df)[0]
-        
+        elapsed_ms = (time.perf_counter() - t0) * 1000
+
+        result = float(pred)
+        _logger.info(
+            f"[{rid}] predict_single: resultado={result:.4f} kWh | "
+            f"inferência={elapsed_ms:.1f}ms"
+        )
+
         return PredictionResponse(
-            consumo_kwh=float(pred),
+            consumo_kwh=result,
             timestamp=datetime.now().isoformat(),
         )
-    
+
     except ValueError as e:
+        _logger.warning(f"[{rid}] predict_single ValueError: {e}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Dados inválidos: {str(e)}",
         )
     except Exception as e:
-        _logger.error(f"Erro na predição: {e}", exc_info=True)
+        _logger.error(f"[{rid}] predict_single ERRO: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Erro ao processar predição: {str(e)}",
@@ -301,31 +425,35 @@ async def predict_single(request: PredictionRequest):
     },
     tags=["Prediction"],
 )
-async def predict_batch(request: BatchPredictionRequest):
+async def predict_batch(request: BatchPredictionRequest, raw_request: Request):
     """
     Realiza predições em lote.
-    
+
     Args:
         request: Lista de registros para predição
-        
+
     Returns:
         BatchPredictionResponse com todas as predições
-        
-    Raises:
-        HTTPException: Se houver erro na predição
     """
+    rid = getattr(raw_request.state, "request_id", "no-id")
+
     if _inference_api is None:
+        _logger.error(f"[{rid}] predict_batch: modelo não carregado")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Modelo não carregado",
         )
-    
+
     if not request.records:
+        _logger.warning(f"[{rid}] predict_batch: lista vazia")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Lista de registros vazia",
         )
-    
+
+    n = len(request.records)
+    _logger.info(f"[{rid}] predict_batch: {n} registros recebidos")
+
     try:
         # Cria DataFrame a partir da lista de requisições
         data_dict = {
@@ -343,25 +471,36 @@ async def predict_batch(request: BatchPredictionRequest):
             "Irradiancia_Direta_Wm2": [r.irradiancia_direta_wm2 for r in request.records],
             "Irradiancia_Difusa_Wm2": [r.irradiancia_difusa_wm2 for r in request.records],
         }
-        
+
         df = pl.DataFrame(data_dict).with_columns(pl.col("data").cast(pl.Date))
-        
-        # Prediz
+
+        _logger.info(f"[{rid}] DataFrame batch criado ({n} linhas), executando inferência...")
+
+        t0 = time.perf_counter()
         preds = _inference_api.predict(df)
-        
+        elapsed_ms = (time.perf_counter() - t0) * 1000
+
+        results = [float(p) for p in preds]
+        _logger.info(
+            f"[{rid}] predict_batch: {n} predições concluídas | "
+            f"inferência={elapsed_ms:.1f}ms | "
+            f"min={min(results):.4f} max={max(results):.4f}"
+        )
+
         return BatchPredictionResponse(
-            predictions=[float(p) for p in preds],
-            n_records=len(request.records),
+            predictions=results,
+            n_records=n,
             timestamp=datetime.now().isoformat(),
         )
-    
+
     except ValueError as e:
+        _logger.warning(f"[{rid}] predict_batch ValueError: {e}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Dados inválidos: {str(e)}",
         )
     except Exception as e:
-        _logger.error(f"Erro na predição em lote: {e}", exc_info=True)
+        _logger.error(f"[{rid}] predict_batch ERRO: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Erro ao processar predições em lote: {str(e)}",
@@ -500,6 +639,7 @@ if __name__ == "__main__":
         print("\n" + "=" * W + "\n")
 
     else:
+        _logger.info(f"Iniciando servidor local na porta {_PORT}...")
         uvicorn.run(
             "tools.api_server:app",
             host="0.0.0.0",

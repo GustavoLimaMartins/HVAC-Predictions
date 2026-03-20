@@ -1,0 +1,17 @@
+# nixpacks.toml — Railway build configuration
+# Garante Python 3.11 e bibliotecas de sistema necessárias para
+# tensorflow-cpu, lightgbm e scipy.
+
+[phases.setup]
+nixPkgs = [
+    "python311",
+    "libstdcxx5",   # tensorflow-cpu (libstdc++.so.6)
+    "zlib",         # pyarrow / polars
+    "libgomp",      # lightgbm / xgboost (OpenMP)
+]
+
+[phases.install]
+cmds = ["pip install --no-cache-dir -r requirements.txt"]
+
+[start]
+cmd = "uvicorn tools.api_server:app --host 0.0.0.0 --port $PORT"
