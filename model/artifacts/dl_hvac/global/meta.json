@@ -1,51 +1,55 @@
 {
   "feature_columns": [
+    "consumo_lag_1h",
+    "consumo_lag_24h",
+    "consumo_rolling_mean_3h",
     "Temperatura_C",
     "Temperatura_Percebida_C",
     "Umidade_Relativa_%",
     "Precipitacao_mm",
     "Velocidade_Vento_kmh",
     "Pressao_Superficial_hPa",
+    "Irradiancia_Direta_Wm2",
+    "Irradiancia_Difusa_Wm2",
     "trimestre",
     "is_feriado",
     "is_vespera_feriado",
     "is_dia_util",
+    "tipo_maquina_",
     "tipo_maquina_AR CONDICIONADO DE JANELA (ACJ)",
-    "tipo_maquina_SPLIT CASSETE",
-    "tipo_maquina_SPLIT DUTO",
     "tipo_maquina_SPLIT HI-WALL",
-    "tipo_maquina_SPLIT PISO-TETO",
     "tipo_maquina_SPLIT\u00c3O",
     "tipo_maquina_SPLIT\u00c3O INVERTER",
     "tipo_maquina_SPLIT\u00c3O ROOFTOP",
     "tipo_maquina_SPLIT\u00c3O SELF CONTAINED",
     "estacao_inverno",
     "estacao_outono",
+    "estacao_primavera",
     "estacao_verao"
   ],
-  "n_groups": 104,
+  "n_groups": 192,
   "n_horas": 24,
-  "n_meses": 10,
+  "n_meses": 13,
   "n_periodos": 4,
   "metrics": {
-    "MAE": 0.4348166882991791,
-    "RMSE": 0.6165337057297249,
-    "R2": 0.9513499140739441,
-    "WMAPE": 17.01384162902832,
-    "Acuracia": 82.98615837097168
+    "MAE": 0.5518791675567627,
+    "RMSE": 0.8754483164374198,
+    "R2": 0.8682000637054443,
+    "WMAPE": 8.844704627990723,
+    "Acuracia": 91.15529537200928
   },
   "train_info": {
-    "n_raw": 508112,
-    "n_after_filter": 188815,
-    "n_removed": 319297,
-    "pct_removed": 62.84,
-    "n_train": 143499,
-    "n_val": 7553,
-    "n_test": 37763,
-    "n_features_dense": 22,
-    "n_groups_embedding": 104,
+    "n_raw": 8249914,
+    "n_after_filter": 2665030,
+    "n_removed": 5584884,
+    "pct_removed": 67.7,
+    "n_train": 2152011,
+    "n_val": 113264,
+    "n_test": 399755,
+    "n_features_dense": 26,
+    "n_groups_embedding": 192,
     "n_horas_embedding": 24,
-    "n_meses_embedding": 10,
+    "n_meses_embedding": 13,
     "n_periodos_embedding": 4
   },
   "config": {
@@ -68,69 +72,69 @@
     "patience_lr": 5,
     "reduce_lr_factor": 0.5,
     "min_lr": 1e-06,
-    "test_size": 0.2,
+    "test_size": 0.15,
     "val_size": 0.05,
     "random_state": 42,
     "artifacts_dir": "model\\artifacts",
-    "noise_floor": 0.7,
-    "iqr_factor": 1.5,
-    "min_segment_size": 50,
-    "noise_quantile": 0.08,
-    "upper_quantile_cap": 0.99,
+    "noise_floor": 0.59,
+    "iqr_factor": 1.75,
+    "min_segment_size": 35,
+    "noise_quantile": 0.1,
+    "upper_quantile_cap": 0.9,
     "segment_params": {
       "AR CONDICIONADO DE JANELA (ACJ)": {
-        "iqr_factor": 1.15,
+        "iqr_factor": 2.0,
         "noise_floor": 0.59,
-        "upper_quantile_cap": 0.85,
-        "noise_quantile": 0.15
+        "upper_quantile_cap": 0.99,
+        "noise_quantile": 0.08
       },
       "SPLIT CASSETE": {
-        "iqr_factor": 1.2,
+        "iqr_factor": 2.0,
         "noise_floor": 1.59,
-        "upper_quantile_cap": 0.85,
-        "noise_quantile": 0.15
+        "upper_quantile_cap": 0.99,
+        "noise_quantile": 0.08
       },
       "SPLIT DUTO": {
-        "iqr_factor": 1.25,
+        "iqr_factor": 2.0,
         "noise_floor": 1.69,
-        "upper_quantile_cap": 0.85,
-        "noise_quantile": 0.15
+        "upper_quantile_cap": 0.99,
+        "noise_quantile": 0.08
       },
       "SPLIT HI-WALL": {
-        "iqr_factor": 1.25,
+        "iqr_factor": 2.0,
         "noise_floor": 0.79,
-        "upper_quantile_cap": 0.85,
-        "noise_quantile": 0.15
+        "upper_quantile_cap": 0.99,
+        "noise_quantile": 0.08
       },
       "SPLIT PISO-TETO": {
-        "iqr_factor": 1.25,
+        "iqr_factor": 2.0,
         "noise_floor": 1.59,
-        "upper_quantile_cap": 0.85,
-        "noise_quantile": 0.15
+        "upper_quantile_cap": 0.99,
+        "noise_quantile": 0.08
       },
       "SPLIT\u00c3O": {
         "iqr_factor": 1.5,
         "noise_floor": 5.49,
         "upper_quantile_cap": 0.95,
-        "noise_quantile": 0.1
+        "noise_quantile": 0.2
       },
       "SPLIT\u00c3O INVERTER": {
-        "iqr_factor": 1.35,
+        "iqr_factor": 1.5,
         "noise_floor": 3.49,
         "upper_quantile_cap": 0.95,
-        "noise_quantile": 0.1
+        "noise_quantile": 0.2
       },
       "SPLIT\u00c3O ROOFTOP": {
         "iqr_factor": 1.5,
         "noise_floor": 5.99,
         "upper_quantile_cap": 0.95,
-        "noise_quantile": 0.1
+        "noise_quantile": 0.2
       },
       "SPLIT\u00c3O SELF CONTAINED": {
         "iqr_factor": 1.5,
         "noise_floor": 5.49,
         "upper_quantile_cap": 0.95,
-        "noise_quantile": 0.1
+        "noise_quantile": 0.2
       }
     }
   }

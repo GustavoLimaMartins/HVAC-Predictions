@@ -39,8 +39,12 @@ class YearStationsEnricher:
         self.df = df.clone()
         
         # Garante que a coluna de data está no tipo correto
+        # Se for string datetime ISO, converte para datetime primeiro, depois para date
         self.df = self.df.with_columns([
-            pl.col(self.date_column).cast(pl.Date)
+            pl.col(self.date_column)
+            .cast(pl.String)
+            .str.to_datetime()
+            .cast(pl.Date)
         ])
         
         print(f"✓ YearStationsEnricher inicializado")

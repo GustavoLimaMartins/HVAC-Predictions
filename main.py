@@ -13,7 +13,8 @@ from datetime import datetime, date
 
 
 def save_consolidated_consumption(df_direct: pl.DataFrame, df_indirect: pl.DataFrame = None, append_to_existing: bool = False) -> None:
-    """Consolida e salva dados de consumo direto e indireto em CSV. Dados brutos para validação e formatação final para ML.
+    """
+    Consolida e salva dados de consumo direto e indireto em Parquet. Dados brutos para validação e formatação final para ML e DL.
     
     Args:
         df_direct: DataFrame com dados de consumo direto
@@ -41,11 +42,11 @@ def save_consolidated_consumption(df_direct: pl.DataFrame, df_indirect: pl.DataF
     
     # Se deve mesclar com dados existentes
     if append_to_existing:
-        output_path_raw = Path(r'use_case\files\consumption_consolidated.csv')
+        output_path_raw = Path(r'use_case\files\consumption_consolidated.parquet')
         if output_path_raw.exists():
             print("\n=== MESCLAGEM COM DADOS EXISTENTES ===")
             try:
-                df_existing = pl.read_csv(str(output_path_raw))
+                df_existing = pl.read_parquet(str(output_path_raw))
                 print(f"Registros existentes: {df_existing.shape[0]}")
                 
                 # Concatena dados novos com existentes
@@ -55,9 +56,9 @@ def save_consolidated_consumption(df_direct: pl.DataFrame, df_indirect: pl.DataF
                 print(f"⚠ Não foi possível ler arquivo existente: {e}")
                 print("  Prosseguindo apenas com novos dados")
     
-    # Salva DataFrame consolidado bruto em CSV
-    output_path_raw = Path(r'use_case\files\consumption_consolidated.csv')
-    df_consolidated.write_csv(str(output_path_raw))
+    # Salva DataFrame consolidado bruto em Parquet
+    output_path_raw = Path(r'use_case\files\consumption_consolidated.parquet')
+    df_consolidated.write_parquet(str(output_path_raw))
     print(f"\n✓ Arquivo bruto salvo: {output_path_raw}")
     
     # Enriquece com features complementares (estações, clima, grupos regionais)
@@ -75,9 +76,9 @@ def save_consolidated_consumption(df_direct: pl.DataFrame, df_indirect: pl.DataF
     print(f"Colunas finais: {df_formatted.columns}")
     print(f"Schema final: {df_formatted.schema}")
     
-    # Salva DataFrame formatado em CSV
-    output_path_final = Path(r'use_case\files\final_dataframe.csv')
-    df_formatted.write_csv(str(output_path_final))
+    # Salva DataFrame formatado em Parquet
+    output_path_final = Path(r'use_case\files\final_dataframe.parquet')
+    df_formatted.write_parquet(str(output_path_final))
     print(f"✓ Arquivo formatado salvo: {output_path_final}")
 
 
@@ -101,8 +102,8 @@ if __name__ == "__main__":
     print("✓ unit_id verificado/adicionado ao CSV")
 
     # Verifica se o arquivo consolidado já existe e foi atualizado hoje
-    output_path_raw = Path(r'use_case\files\consumption_consolidated.csv')
-    output_path_final = Path(r'use_case\files\final_dataframe.csv')
+    output_path_raw = Path(r'use_case\files\consumption_consolidated.parquet')
+    output_path_final = Path(r'use_case\files\final_dataframe.parquet')
     
     if output_path_raw.exists():
         # Obtém a data de modificação do arquivo
@@ -119,7 +120,7 @@ if __name__ == "__main__":
             print("✓ Arquivo foi atualizado hoje. Reaproveitando dados existentes...")
             
             # Carrega o arquivo consolidado existente
-            df_consolidated = pl.read_csv(str(output_path_raw))
+            df_consolidated = pl.read_parquet(str(output_path_raw))
             print(f"✓ {df_consolidated.shape[0]} registros carregados do cache")
             print(f"  Colunas: {df_consolidated.columns}")
             
@@ -138,8 +139,8 @@ if __name__ == "__main__":
             print(f"Colunas finais: {df_formatted.columns}")
             print(f"Schema final: {df_formatted.schema}")
             
-            # Salva DataFrame formatado em CSV
-            df_formatted.write_csv(str(output_path_final))
+            # Salva DataFrame formatado em Parquet
+            df_formatted.write_parquet(str(output_path_final))
             print(f"Arquivo formatado salvo: {output_path_final}")
             
             print("\n" + "=" * 80)
@@ -162,7 +163,7 @@ if __name__ == "__main__":
     
     if output_path_raw.exists():
         try:
-            df_consolidated_existing = pl.read_csv(str(output_path_raw))
+            df_consolidated_existing = pl.read_parquet(str(output_path_raw))
             processed_unit_ids = set(df_consolidated_existing['unit_id'].drop_nulls().unique().to_list())
             print(f"  Unit_ids já processados: {len(processed_unit_ids)}")
         except Exception as e:
@@ -338,7 +339,7 @@ if __name__ == "__main__":
                 'metodo',
                 'machine_type',
                 'latitude',
-                'longitude'
+                'longitude',
             ])
         )
         
@@ -379,7 +380,7 @@ if __name__ == "__main__":
         print(f"  Dispositivos com consumo direto: {len(devices_with_consumption)}")
         print(f"  Dispositivos para método indireto: {len(devices_without_consumption)}")
         
-        if devices_without_consumption:
+        if devices_without_consumption or len(devices_with_consumption) == 0:
             # Cria DataFrame com dispositivos sem consumo e suas respectivas datas por unidade
             df_devices_for_indirect = df_devices_by_units.filter(
                 pl.col('device_code').is_in(devices_without_consumption)
@@ -391,7 +392,7 @@ if __name__ == "__main__":
             
             all_indirect_data = []
             
-            for row in tqdm(df_devices_for_indirect.iter_rows(named=True), 
+            for row in tqdm(df_devices_for_indirect.to_dicts(), 
                           desc="Progresso PostgreSQL", 
                           unit="device",
                           total=df_devices_for_indirect.shape[0]):
@@ -461,7 +462,7 @@ if __name__ == "__main__":
                             'metodo',
                             'machine_type',
                             'latitude',
-                            'longitude'
+                            'longitude',
                         ])
                     )
                     
@@ -484,5 +485,102 @@ if __name__ == "__main__":
             print("\n✓ Todos os dispositivos já têm consumo direto")
             save_consolidated_consumption(df_final, append_to_existing=True)
     else:
+        # Nenhum dado direto encontrado - processa TODOS os dispositivos via método indireto
+        print(f"\n⚠ Nenhum consumo encontrado pelo método DIRETO")
+        print(f"[10/10] Processando consumo INDIRETO para TODOS os dispositivos (PostgreSQL)...")
+        
         df_final = None
-        print("\n✗ ERRO: Nenhum dado de consumo encontrado.")
+        devices_with_consumption = []
+        
+        # Cria DataFrame com TODOS os dispositivos e suas respectivas datas por unidade
+        df_devices_for_indirect = df_devices_by_units.join(
+            units_with_dates,
+            on='unit_id',
+            how='inner'
+        ).select(['device_code', 'unit_id', 'data_instalacao', 'data_inicio_automacao'])
+        
+        all_indirect_data = []
+        
+        for row in tqdm(df_devices_for_indirect.to_dicts(), 
+                      desc="Progresso PostgreSQL", 
+                      unit="device",
+                      total=df_devices_for_indirect.shape[0]):
+            device_code = row['device_code']
+            date_init = str(row['data_instalacao'])
+            date_final = str(row['data_inicio_automacao'])
+            
+            # Consulta consumo por método indireto para este dispositivo com suas datas específicas
+            query_indirect = pg_query.get_device_consumptions_by_indirect_method(
+                device_code=device_code,
+                date_init=date_init, 
+                date_final=date_final
+            )
+            df_device_indirect = pg_client.data_convert_to_polars(query_indirect)
+            
+            if df_device_indirect.shape[0] > 0:
+                all_indirect_data.append(df_device_indirect)
+        
+        # Consolida todos os dados indiretos
+        if all_indirect_data:
+            df_indirect_consumption = pl.concat(all_indirect_data).with_columns([
+                pl.col('consumption').cast(pl.Float64),
+                pl.col('device_code').cast(pl.Utf8),
+                pl.col('record_date').cast(pl.Datetime)  # Garante datetime para extração de hora
+            ])
+            print(f"\n✓ Dados brutos coletados: {df_indirect_consumption.shape[0]} registros")
+            
+            if df_indirect_consumption.shape[0] > 0:
+                
+                # Pipeline otimizado: join, filtro, conversão e padronização em sequência
+                df_indirect_standardized = (
+                    df_indirect_consumption
+                    .join(df_devices_for_indirect, on='device_code', how='inner')
+                    .filter(pl.col('consumption') > 0)
+                    .with_columns([
+                        pl.col('unit_id').cast(pl.Int64),
+                        pl.col('device_code').cast(pl.Utf8).alias('device_id'),
+                        pl.col('device_code').str.slice(0, 8).cast(pl.Utf8).alias('device_version'),
+                        pl.col('record_date').dt.hour().cast(pl.Int64).alias('hora'),
+                        pl.col('record_date').cast(pl.Date).alias('data'),
+                        pl.col('consumption').cast(pl.Float64).alias('consumo_kwh'),
+                        pl.col('data_instalacao').cast(pl.Date),
+                        pl.col('data_inicio_automacao').cast(pl.Date),
+                        pl.lit('indireto').cast(pl.Utf8).alias('metodo')
+                    ])
+                    .join(
+                        df_disponibility,
+                        left_on=['device_id', 'data'],
+                        right_on=['device_code', 'record_date'],
+                        how='inner'
+                    )
+                    .join(
+                        df_location_data,
+                        left_on='device_id',
+                        right_on='device_code',
+                        how='left'
+                    )
+                    .select([
+                        'unit_id',
+                        'device_id',
+                        'device_version',
+                        'hora',
+                        'data',
+                        'consumo_kwh',
+                        'data_instalacao',
+                        'data_inicio_automacao',
+                        'metodo',
+                        'machine_type',
+                        'latitude',
+                        'longitude',
+                    ])
+                )
+                
+                if df_indirect_standardized.shape[0] > 0:
+                    print(f"✓ Consumo indireto processado: {df_indirect_standardized.shape[0]} registros")
+                    save_consolidated_consumption(df_indirect_standardized, append_to_existing=True)
+                else:
+                    print("\n✗ ERRO: Nenhum dado de consumo encontrado após filtros.")
+            else:
+                print("\n✗ ERRO: Nenhum dado indireto após processamento.")
+        else:
+            print("\n✗ ERRO: Nenhum dado de consumo encontrado pelos métodos direto e indireto.")

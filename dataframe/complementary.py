@@ -10,13 +10,21 @@ Retorna apenas as novas colunas para integração em DataFrames existentes.
 """
 
 import polars as pl
+import sys
+from pathlib import Path
 
-from .complementary_features.year_stations import enrich_with_seasons
-from .complementary_features.temperature_openmeteo import WeatherEnricher
-from .complementary_features.regional_group.model import RegionalGroupClassifier
+try:
+    from .complementary_features.year_stations import enrich_with_seasons
+    from .complementary_features.temperature_openmeteo import WeatherEnricher
+    from .complementary_features.regional_group.model import RegionalGroupClassifier
+except ImportError:
+    sys.path.insert(0, str(Path(__file__).parent))
+    from complementary_features.year_stations import enrich_with_seasons
+    from complementary_features.temperature_openmeteo import WeatherEnricher
+    from complementary_features.regional_group.model import RegionalGroupClassifier
 
 
-def enrich_dataframe_with_all_features(df: pl.DataFrame, export_geo_reference: bool = True) -> pl.DataFrame:
+def enrich_dataframe_with_all_features(df: pl.DataFrame, export_geo_reference: bool = True, date_column: str = "data") -> pl.DataFrame:
     """
     Pipeline completo de enriquecimento: estações, clima e grupos regionais.
     
@@ -44,7 +52,7 @@ def enrich_dataframe_with_all_features(df: pl.DataFrame, export_geo_reference: b
     
     # 1. Estações do ano (apenas coluna 'data')
     print("\n[1/3] Classificando estações do ano...")
-    df_with_season = enrich_with_seasons(df.select('data'))
+    df_with_season = enrich_with_seasons(df.select(date_column), date_column=date_column)
     df_season = df_with_season.select('estacao')
     print(f"✓ {len(df_season)} registros processados")
     
@@ -102,11 +110,11 @@ def main():
     print("EXEMPLO: Enriquecimento de consumption_consolidated.csv")
     print("=" * 80)
     
-    csv_path = r'use_case\files\consumption_consolidated.csv'
+    parquet_path = r'use_case\files\consumption_consolidated.parquet'
     
     # Carrega DataFrame
-    print("\nCarregando CSV...")
-    df = pl.read_csv(csv_path)
+    print("\nCarregando Parquet...")
+    df = pl.read_parquet(parquet_path)
     print(f"✓ {len(df)} registros carregados")
     print(f"✓ Colunas originais: {len(df.columns)}")
     

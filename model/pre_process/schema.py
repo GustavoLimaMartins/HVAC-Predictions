@@ -20,6 +20,8 @@ existem no arquivo consolidado:
     Precipitacao_mm                     Precipitacao_mm
     Velocidade_Vento_kmh                Velocidade_Vento_kmh
     Pressao_Superficial_hPa             Pressao_Superficial_hPa
+    Irradiancia_Direta_Wm2              Irradiancia_Direta_Wm2
+    Irradiancia_Difusa_Wm2              Irradiancia_Difusa_Wm2
                                         ── features de data ──
                                         ano              (ex: 2025)
                                         mes              (1 a 12)
@@ -35,19 +37,6 @@ from __future__ import annotations
 
 import polars as pl
 import holidays
-
-
-# ── Mapeamento de dia da semana (ISO: 1=Segunda … 7=Domingo) ───────────────────
-_WEEKDAY_MAP: dict[int, str] = {
-    1: "Segunda",
-    2: "Terça",
-    3: "Quarta",
-    4: "Quinta",
-    5: "Sexta",
-    6: "Sábado",
-    7: "Domingo",
-}
-
 
 class ModelSchema:
     """
@@ -85,7 +74,9 @@ class ModelSchema:
             raise ValueError(f"Colunas obrigatórias ausentes: {sorted(missing)}")
 
         self._schema_fields = schema_fields
-        self.df = df.clone()
+        # ✅ Remove linhas com valores nulos em qualquer coluna obrigatória
+        self.df = df.clone().drop_nulls(subset=schema_fields)
+        self.clipping_limits_ = {}  # Armazena limites de clipping para persistência
 
     # ── Pipeline completo ────────────────────────────────────────────────────
 
@@ -95,13 +86,18 @@ class ModelSchema:
 
         Etapas:
             1. add_date_features          — features derivadas da coluna 'data'
-            2. adjust_machine_type        — padroniza nomes de equipamento
-            3. make_categorical_columns   — declara grupo_regional e mes como categóricos
-            4. make_one_hot_encode_columns — OHE em tipo_maquina, estacao, etc.
-            5. make_clipping_min_max_columns — normalização das features contínuas
+            2. add_temporal_features      — lag e rolling mean (requer device_id)
+            3. adjust_machine_type        — padroniza nomes de equipamento
+            4. make_categorical_columns   — declara grupo_regional e mes como categóricos
+            5. make_one_hot_encode_columns — OHE em tipo_maquina, estacao, etc.
+
+        NOTA: make_clipping_min_max_columns NÃO é chamado aqui pois deve ser
+        aplicado APENAS ao conjunto de treino (não em validação/teste/inferência).
+        Use `.make_clipping_min_max_columns()` manualmente após `build()` apenas
+        para dados de treino.
 
         Returns:
-            pl.DataFrame pronto para treinamento.
+            pl.DataFrame pronto para treinamento ou inferência.
         """
         return (
             ModelSchema(self.df, self._schema_fields)
@@ -110,11 +106,6 @@ class ModelSchema:
             .make_categorical_columns(["grupo_regional"])
             .make_one_hot_encode_columns([
                 "tipo_maquina", "estacao", "periodo_dia"
-            ])
-            .make_clipping_min_max_columns([
-                "Temperatura_C", "Temperatura_Percebida_C",
-                "Umidade_Relativa_%", "Precipitacao_mm",
-                "Velocidade_Vento_kmh", "Pressao_Superficial_hPa",
             ])
             .df
         )
@@ -233,6 +224,7 @@ class ModelSchema:
             'split-duto': 'SPLIT DUTO',
             'self': 'SPLITÃO SELF CONTAINED',
             'split-piso-teto': 'SPLIT PISO-TETO',
+            'split piso teto': 'SPLIT PISO-TETO',
             'split-cassete': 'SPLIT CASSETE',
             'split cassete': 'SPLIT CASSETE',
             'Acj': 'AR CONDICIONADO DE JANELA (ACJ)',
@@ -278,6 +270,7 @@ class ModelSchema:
             'Splt Hi-Wall': 'SPLIT HI-WALL',
             'tipo-split duto': 'SPLIT DUTO',
             'tipo-split-cassete': 'SPLIT CASSETE',
+            'tipo-split-hi-wall': 'SPLIT HI-WALL',
             'tipo-split-piso-teto': 'SPLIT PISO-TETO',
             'tipo-split-teto': 'SPLIT PISO-TETO',
             'TROCADOR': 'TROCADOR DE CALOR',
@@ -336,7 +329,7 @@ class ModelSchema:
             self.df = self.df.drop(col)
         return self
     
-    def make_clipping_min_max_columns(self, columns: list[str]) -> "ModelSchema":
+    def make_clipping_min_max_columns(self, columns: list[str], use_persisted_limits: bool = False) -> "ModelSchema":
         """
         Aplica Clipping + Min/Max às colunas numéricas especificadas.
 
@@ -353,16 +346,43 @@ class ModelSchema:
 
         Args:
             columns (list[str]): Lista de nomes de colunas a serem normalizadas.
+            use_persisted_limits (bool): ✅ Novo - Se True, usar limites de self.clipping_limits_ 
+                                         (para inferência com dados de treino).
 
         Returns:
             Self (para method chaining).
         """
         for col in columns:
-            q1 = self.df[col].quantile(0.15)
-            q3 = self.df[col].quantile(0.85)
-            iqr = q3 - q1
-            lower = q1 - 1.5 * iqr
-            upper = q3 + 1.5 * iqr
+            # ✅ Skip colunas que não existem no DataFrame
+            if col not in self.df.columns:
+                continue
+            
+            # ✅ Novo: se use_persisted_limits=True, usar limites pré-calculados
+            if use_persisted_limits and col in self.clipping_limits_:
+                limits = self.clipping_limits_[col]
+                lower = limits["lower"]
+                upper = limits["upper"]
+            else:
+                # Calcular limites novamente (comportamento antigo para treino)
+                q1 = self.df[col].quantile(0.15)
+                q3 = self.df[col].quantile(0.85)
+                
+                # ✅ Skip se quantile retorna None (coluna vazia ou todos NaN)
+                if q1 is None or q3 is None:
+                    continue
+                
+                iqr = q3 - q1
+                lower = q1 - 1.5 * iqr
+                upper = q3 + 1.5 * iqr
+
+                # ✅ Armazena limites para persistência em metadata_norm.json
+                self.clipping_limits_[col] = {
+                    "q1": float(q1),
+                    "q3": float(q3),
+                    "iqr": float(iqr),
+                    "lower": float(lower),
+                    "upper": float(upper),
+                }
 
             self.df = self.df.with_columns(
                 ((pl.col(col).clip(lower, upper) - lower) / (upper - lower)).alias(col)
@@ -537,12 +557,12 @@ if __name__ == "__main__":
 
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
-    csv_path = Path(r"use_case\files\final_dataframe.csv")
+    csv_path = Path(r"use_case\files\final_dataframe.parquet")
     if not csv_path.exists():
         print(f"✗ Arquivo não encontrado: {csv_path}")
         sys.exit(1)
 
-    df_raw = pl.read_csv(csv_path)
+    df_raw = pl.read_parquet(csv_path)
     print(f"✓ {df_raw.shape[0]} registros carregados | colunas: {df_raw.columns}")
 
     schema_fields = [
@@ -551,6 +571,8 @@ if __name__ == "__main__":
         "Temperatura_C", "Temperatura_Percebida_C",
         "Umidade_Relativa_%", "Precipitacao_mm",
         "Velocidade_Vento_kmh", "Pressao_Superficial_hPa",
+        "Irradiancia_Direta_Wm2", "Irradiancia_Difusa_Wm2",
+        "consumo_lag_1h", "consumo_lag_24h", "temp_rolling_mean_3h"
     ]
     schema = ModelSchema(df_raw, schema_fields)
     df_model = schema.build()
@@ -567,11 +589,7 @@ if __name__ == "__main__":
     print(f"Coluna 'machine_type' removida: {'machine_type' not in df_model.columns}")
 
     print(f"\nAmostra — features numéricas normalizadas (Clipping + Min/Max):")
-    print(df_model.select([
-        "Temperatura_C", "Temperatura_Percebida_C",
-        "Umidade_Relativa_%", "Precipitacao_mm",
-        "Velocidade_Vento_kmh", "Pressao_Superficial_hPa",
-    ]).head(10))
+    print(df_model.select(schema_fields).head(10))
 
     print(f"\nAmostra — features booleanas e temporais:")
     print(df_model.select([

@@ -131,6 +131,8 @@ _SCHEMA_FIELDS: list[str] = [
     "Temperatura_C", "Temperatura_Percebida_C",
     "Umidade_Relativa_%", "Precipitacao_mm",
     "Velocidade_Vento_kmh", "Pressao_Superficial_hPa",
+    "Irradiancia_Direta_Wm2", "Irradiancia_Difusa_Wm2",
+    "consumo_lag_1h", "consumo_lag_24h", "consumo_rolling_mean_3h",
 ]
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -371,6 +373,22 @@ def _filter_outliers(
     """
     n_before = len(df)
 
+    # Diagnóstico: machine_type ausente/vazio gera segmento em branco nos logs.
+    if "machine_type" in df.columns:
+        n_missing_mt = int(
+            df.select(
+                (
+                    pl.col("machine_type").is_null()
+                    | (pl.col("machine_type").cast(pl.String).str.strip_chars() == "")
+                ).sum()
+            ).item()
+        )
+        if n_missing_mt > 0:
+            _logger.warning(
+                "machine_type com valor nulo/vazio em %d registro(s); usando rótulo 'DESCONHECIDO'.",
+                n_missing_mt,
+            )
+
     # normaliza machine_type → nomes canônicos para segmentação coerente
     _norm = (
         ModelSchema(df.select("machine_type"), ["machine_type"])
@@ -378,7 +396,15 @@ def _filter_outliers(
         .df["tipo_maquina"]
         .alias("_norm_type")
     )
-    df = df.with_row_index("__row_idx__").with_columns(_norm)
+    df = df.with_row_index("__row_idx__").with_columns(_norm).with_columns(
+        pl.when(
+            pl.col("_norm_type").is_null()
+            | (pl.col("_norm_type").cast(pl.String).str.strip_chars() == "")
+        )
+        .then(pl.lit("DESCONHECIDO"))
+        .otherwise(pl.col("_norm_type").cast(pl.String))
+        .alias("_norm_type")
+    )
 
     floor_base = max(float(noise_floor), 0.0)
     q_noise = float(min(max(noise_quantile, 0.0), 0.25))
@@ -686,6 +712,8 @@ class DLPipeline:
         self.train_info_:      dict                    = {}
         self._is_fitted:       bool                    = False
         self._normalization_stats_: dict | None       = None  # Estatísticas de normalização
+        self._te_map:          dict | None            = None  # Target Encoding map (compatibilidade futura)
+        self._clipping_limits: dict | None            = None  # ✅ Novo: persistir limites de clipping
 
     # -- estágio 2 — pré-processamento ----------------------------------------
 
@@ -741,6 +769,7 @@ class DLPipeline:
         schema = ModelSchema.__new__(ModelSchema)
         schema.df = df.clone()
         schema._schema_fields = _SCHEMA_FIELDS
+        schema.clipping_limits_ = {}  # ✅ Inicializar atributo que foi bypassado pelo __new__()
         
         schema.add_date_features()
         
@@ -748,11 +777,18 @@ class DLPipeline:
         schema.adjust_machine_type()
         schema.make_categorical_columns(["grupo_regional"])
         schema.make_one_hot_encode_columns(["tipo_maquina", "estacao", "periodo_dia"])
+        
+        # IMPORTANTE: make_clipping_min_max_columns é aplicado APENAS em dados de treino
         schema.make_clipping_min_max_columns([
             "Temperatura_C", "Temperatura_Percebida_C",
             "Umidade_Relativa_%", "Precipitacao_mm",
             "Velocidade_Vento_kmh", "Pressao_Superficial_hPa",
+            "Irradiancia_Direta_Wm2", "Irradiancia_Difusa_Wm2",
+            "consumo_lag_1h", "consumo_lag_24h", "consumo_rolling_mean_3h"
         ])
+        
+        # ✅ Novo: persistir clipping_limits para reutilização em inferência
+        self._clipping_limits = schema.clipping_limits_
         
         df_ml = schema.df
         
@@ -787,6 +823,14 @@ class DLPipeline:
             "Schema concluido: %d registros x %d colunas",
             df_dl.shape[0], df_dl.shape[1],
         )
+
+        # Em alguns segmentos, o filtro de outliers pode remover 100% das linhas.
+        # Evita erro em arr.max() com array vazio e delega decisão ao chamador.
+        if df_dl.height == 0:
+            raise ValueError(
+                "Sem dados apos pre-processamento (outlier filter + schema). "
+                "Ajuste noise_floor/iqr_factor/segment_params para este segmento."
+            )
 
         # Entity Embeddings → X_emb (int32, um Input por coluna)
         emb_cols = ["grupo_regional", "hora", "mes", "periodo_dia"]
@@ -1011,6 +1055,7 @@ class DLPipeline:
             n_horas=self.n_horas_,
             n_meses=self.n_meses_,
             n_periodos=self.n_periodos_,
+            clipping_limits=self._clipping_limits,
         )
         inputs = normalizer.transform(df)
 
@@ -1067,6 +1112,8 @@ class DLPipeline:
             "version": "1.0",
             "timestamp": datetime.datetime.now().isoformat(timespec="seconds"),
             "dense_features": self._normalization_stats_ or {},
+            "target_encoding": self._te_map or {},  # ✅ Compatibilidade futura para TE
+            "clipping_limits": self._clipping_limits or {},  # ✅ Novo: persistir limites de clipping
             "embeddings": {
                 "grupo_regional": {
                     "input_dim": self.n_groups_,
@@ -1122,6 +1169,11 @@ class DLPipeline:
         pipeline.metrics_          = meta["metrics"]
         pipeline.train_info_       = meta.get("train_info", {})
         pipeline._is_fitted        = True
+        
+        # ✅ Carregar Target Encoding map se disponível (compatibilidade futura)
+        with (path / "metadata_norm.json").open(encoding="utf-8") as fh:
+            metadata_norm = json.load(fh)
+            pipeline._clipping_limits = metadata_norm.get("clipping_limits") or None  # ✅ Novo: carregar clipping limits
 
         _logger.info("Pipeline carregado de: %s", path)
         return pipeline
@@ -1160,6 +1212,7 @@ class SegmentedDLPipeline:
         self.config      = config or DLPipelineConfig()
         self.segments_:  dict[str, DLPipeline]        = {}
         self.metrics_:   dict[str, dict[str, float]]  = {}
+        self.skipped_segments_: dict[str, str]        = {}
         self._is_fitted: bool                         = False
 
     # -- treinamento ----------------------------------------------------------
@@ -1187,7 +1240,15 @@ class SegmentedDLPipeline:
             .df["tipo_maquina"]
             .alias("_norm_type")
         )
-        df = df.with_columns(_norm_series)
+        df = df.with_columns(_norm_series).with_columns(
+            pl.when(
+                pl.col("_norm_type").is_null()
+                | (pl.col("_norm_type").cast(pl.String).str.strip_chars() == "")
+            )
+            .then(pl.lit("DESCONHECIDO"))
+            .otherwise(pl.col("_norm_type").cast(pl.String))
+            .alias("_norm_type")
+        )
 
         machine_types = sorted(df["_norm_type"].unique().to_list())
         _log_block(
@@ -1197,13 +1258,38 @@ class SegmentedDLPipeline:
             n = int((df["_norm_type"] == mt).sum())
             _logger.info("  → '%s'  (%d registros)", mt, n)
 
+        skipped: dict[str, str] = {}
         for mt in machine_types:
             df_seg             = df.filter(pl.col("_norm_type") == mt).drop("_norm_type")
             _log_block(f"SEGMENTO DL  '{mt}'")
             pipeline           = DLPipeline(config=self.config)
-            pipeline.fit(df_seg)
+            try:
+                pipeline.fit(df_seg)
+            except ValueError as exc:
+                reason = str(exc)
+                skipped[mt] = reason
+                _logger.warning(
+                    "Segmento '%s' ignorado: %s",
+                    mt,
+                    reason,
+                )
+                continue
             self.segments_[mt] = pipeline
             self.metrics_[mt]  = pipeline.metrics_
+
+        self.skipped_segments_ = skipped
+        if skipped:
+            _log_block(f"SEGMENTOS DL PULADOS  [n={len(skipped)}]")
+            for mt, reason in skipped.items():
+                _logger.warning("  - %s | motivo: %s", mt, reason)
+        else:
+            _logger.info("Nenhum segmento foi pulado na etapa segmentada DL.")
+
+        if not self.segments_:
+            raise RuntimeError(
+                "Nenhum segmento treinável após filtro de outliers e schema. "
+                "Revise parâmetros de limpeza (noise_floor/iqr_factor/segment_params)."
+            )
 
         self._is_fitted = True
         self._log_summary()
@@ -1322,7 +1408,15 @@ class SegmentedDLPipeline:
             .df["tipo_maquina"]
             .alias("_norm_type")
         )
-        df_with_norm = df.with_columns(_norm_series)
+        df_with_norm = df.with_columns(_norm_series).with_columns(
+            pl.when(
+                pl.col("_norm_type").is_null()
+                | (pl.col("_norm_type").cast(pl.String).str.strip_chars() == "")
+            )
+            .then(pl.lit("DESCONHECIDO"))
+            .otherwise(pl.col("_norm_type").cast(pl.String))
+            .alias("_norm_type")
+        )
 
         present = set(df_with_norm["_norm_type"].unique().to_list())
         unknown = present - set(self.segments_.keys())
@@ -1414,12 +1508,12 @@ class SegmentedDLPipeline:
 
 def _load_raw_df(csv_path: Path) -> pl.DataFrame:
     """
-    Carrega o CSV e aplica o fluxo completo de normalização do ModelSchema
+    Carrega o Parquet e aplica o fluxo completo de normalização do ModelSchema
     para validar e inspecionar os dados de entrada.
 
     Espelha a execução direta de ``model/pre_process/schema.py``:
 
-        1. pl.read_csv               — leitura do arquivo
+        1. pl.read_parquet           — leitura do arquivo
         2. ModelSchema.__init__      — verifica colunas obrigatórias
         3. ModelSchema.build()       — pipeline completo de normalização
                                        (adjust_machine_type, features de data,
@@ -1433,7 +1527,7 @@ def _load_raw_df(csv_path: Path) -> pl.DataFrame:
     hora e mes).
 
     Args:
-        csv_path: Caminho para o arquivo CSV de entrada.
+        parquet_path: Caminho para o arquivo Parquet de entrada.
 
     Returns:
         pl.DataFrame no schema bruto, pronto para ser passado ao pipeline.
@@ -1441,11 +1535,11 @@ def _load_raw_df(csv_path: Path) -> pl.DataFrame:
     Raises:
         SystemExit: Arquivo não encontrado ou colunas obrigatórias ausentes.
     """
-    if not csv_path.exists():
-        _logger.error("Arquivo nao encontrado: %s", csv_path)
+    if not parquet_path.exists():
+        _logger.error("Arquivo nao encontrado: %s", parquet_path)
         sys.exit(1)
 
-    df_raw = pl.read_csv(csv_path)
+    df_raw = pl.read_parquet(parquet_path)
     _logger.info(
         "✔ %d registros carregados | %d colunas  ←  %s",
         df_raw.shape[0], df_raw.shape[1], csv_path.name,
@@ -1505,8 +1599,8 @@ if __name__ == "__main__":
         datefmt="%H:%M:%S",
     )
 
-    csv_path = Path(r"use_case\files\final_dataframe.csv")
-    df_raw   = _load_raw_df(csv_path)
+    parquet_path = Path(r"use_case\files\final_dataframe.parquet")
+    df_raw   = _load_raw_df(parquet_path)
 
     # -- 1. Configuracao ------------------------------------------------------
     cfg = DLPipelineConfig(
@@ -1524,69 +1618,71 @@ if __name__ == "__main__":
         patience_stop=15,
         patience_lr=5,
         reduce_lr_factor=0.5,
-        test_size=0.2,
+        test_size=0.15,
         val_size=0.05,
         random_state=42,
         # Pré-etapa 1 — idêntica ao ML pipeline (__main__)
-        noise_floor=0.7,
-        iqr_factor=1.5,
-        min_segment_size=50,
-        noise_quantile=0.15,
-        upper_quantile_cap=0.85,
+        noise_floor=0.59,
+        iqr_factor=1.75,
+        min_segment_size=35,
+        noise_quantile=0.10,
+        upper_quantile_cap=0.90,
         segment_params={
+            # Chave deve ser o tipo normalizado (exibido no log Outliers[...])
+            # Exemplos de sobrescrita por segmento:
             "AR CONDICIONADO DE JANELA (ACJ)": {
-                "iqr_factor": 1.15,
+                "iqr_factor": 2.0,
                 "noise_floor": 0.59,
-                "upper_quantile_cap": 0.75,
-                "noise_quantile": 0.15,
+                "upper_quantile_cap": 0.99,
+                "noise_quantile": 0.08,
             },
             "SPLIT CASSETE": {
-                "iqr_factor": 1.20,
+                "iqr_factor": 2.0,
                 "noise_floor": 1.59,
-                "upper_quantile_cap": 0.75,
-                "noise_quantile": 0.15,
+                "upper_quantile_cap": 0.99,
+                "noise_quantile": 0.08,
             },
             "SPLIT DUTO": {
-                "iqr_factor": 1.25,
+                "iqr_factor": 2.0,
                 "noise_floor": 1.69,
-                "upper_quantile_cap": 0.75,
-                "noise_quantile": 0.15,
+                "upper_quantile_cap": 0.99,
+                "noise_quantile": 0.08,
             },
             "SPLIT HI-WALL": {
-                "iqr_factor": 1.25,
+                "iqr_factor": 2.0,
                 "noise_floor": 0.79,
-                "upper_quantile_cap": 0.75,
-                "noise_quantile": 0.15,
+                "upper_quantile_cap": 0.99,
+                "noise_quantile": 0.08,
             },
             "SPLIT PISO-TETO": {
-                "iqr_factor": 1.25,
+                "iqr_factor": 2.0,
                 "noise_floor": 1.59,
-                "upper_quantile_cap": 0.75,
-                "noise_quantile": 0.15,
+                "upper_quantile_cap": 0.99,
+                "noise_quantile": 0.08,
             },
             "SPLITÃO": {
                 "iqr_factor": 1.5,
                 "noise_floor": 5.49,
-                "upper_quantile_cap": 0.90,
-                "noise_quantile": 0.25,
+                "upper_quantile_cap": 0.95,
+                "noise_quantile": 0.20,
             },
             "SPLITÃO INVERTER": {
-                "iqr_factor": 1.35,
+                "iqr_factor": 1.5,
                 "noise_floor": 3.49,
-                "upper_quantile_cap": 0.90,
-                "noise_quantile": 0.25,
+                "upper_quantile_cap": 0.95,
+                "noise_quantile": 0.20,
             },
             "SPLITÃO ROOFTOP": {
                 "iqr_factor": 1.5,
                 "noise_floor": 5.99,
-                "upper_quantile_cap": 0.90,
-                "noise_quantile": 0.25
+                "upper_quantile_cap": 0.95,
+                "noise_quantile": 0.20
             },
             "SPLITÃO SELF CONTAINED": {
                 "iqr_factor": 1.5,
                 "noise_floor": 5.49,
-                "upper_quantile_cap": 0.90,
-                "noise_quantile": 0.25
+                "upper_quantile_cap": 0.95,
+                "noise_quantile": 0.20
             }
         },
     )

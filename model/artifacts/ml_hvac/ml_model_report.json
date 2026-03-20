@@ -1,22 +1,25 @@
 {
-  "timestamp": "2026-03-12T15:05:43",
-  "n_segments": 9,
+  "timestamp": "2026-03-20T17:07:51",
+  "n_segments": 7,
   "consolidated": {
-    "n_train": 151047,
-    "n_test": 37768,
-    "MAE": 0.396388,
-    "RMSE": 0.51236,
-    "MAPE": 18.223184,
-    "WMAPE": 17.184001,
-    "Acuracia": 81.776816
+    "n_train": 2265329,
+    "n_test": 399768,
+    "MAE": 0.527749,
+    "RMSE": 0.748581,
+    "MAPE": 7.690603,
+    "WMAPE": 7.802176,
+    "Acuracia": 92.309397
   },
   "segmented": {
     "AR CONDICIONADO DE JANELA (ACJ)": {
       "best_model": "XGBRegressor",
-      "n_train": 1409,
-      "n_test": 353,
-      "n_features": 20,
+      "n_train": 1002,
+      "n_test": 177,
+      "n_features": 26,
       "feature_columns": [
+        "consumo_lag_1h",
+        "consumo_lag_24h",
+        "consumo_rolling_mean_3h",
         "grupo_regional",
         "Temperatura_C",
         "Temperatura_Percebida_C",
@@ -24,6 +27,8 @@
         "Precipitacao_mm",
         "Velocidade_Vento_kmh",
         "Pressao_Superficial_hPa",
+        "Irradiancia_Direta_Wm2",
+        "Irradiancia_Difusa_Wm2",
         "trimestre",
         "is_feriado",
         "is_vespera_feriado",
@@ -33,6 +38,7 @@
         "tipo_maquina_AR CONDICIONADO DE JANELA (ACJ)",
         "estacao_inverno",
         "estacao_outono",
+        "estacao_primavera",
         "periodo_dia_Madrugada",
         "periodo_dia_Manh\u00e3",
         "periodo_dia_Noite",
@@ -51,87 +57,32 @@
       },
       "models": {
         "XGBRegressor": {
-          "MAE": 0.174973,
-          "RMSE": 0.24784,
-          "R2": 0.683322,
-          "MAPE": 17.591548,
-          "WMAPE": 14.947049,
-          "Acuracia": 82.408452
+          "MAE": 0.051128,
+          "RMSE": 0.069202,
+          "R2": 0.505529,
+          "MAPE": 6.785148,
+          "WMAPE": 6.79425,
+          "Acuracia": 93.214852
         },
         "LGBMRegressor": {
-          "MAE": 0.18738,
-          "RMSE": 0.256133,
-          "R2": 0.661775,
-          "MAPE": 18.881133,
-          "WMAPE": 16.006912,
-          "Acuracia": 81.118867
+          "MAE": 0.052089,
+          "RMSE": 0.069828,
+          "R2": 0.496541,
+          "MAPE": 6.8611,
+          "WMAPE": 6.92205,
+          "Acuracia": 93.1389
         }
       }
     },
-    "SPLIT CASSETE": {
-      "best_model": "LGBMRegressor",
-      "n_train": 10872,
-      "n_test": 2719,
-      "n_features": 21,
-      "feature_columns": [
-        "grupo_regional",
-        "Temperatura_C",
-        "Temperatura_Percebida_C",
-        "Umidade_Relativa_%",
-        "Precipitacao_mm",
-        "Velocidade_Vento_kmh",
-        "Pressao_Superficial_hPa",
-        "trimestre",
-        "is_feriado",
-        "is_vespera_feriado",
-        "is_dia_util",
-        "hora_target_enc",
-        "mes_target_enc",
-        "tipo_maquina_SPLIT CASSETE",
-        "estacao_inverno",
-        "estacao_outono",
-        "estacao_verao",
-        "periodo_dia_Madrugada",
-        "periodo_dia_Manh\u00e3",
-        "periodo_dia_Noite",
-        "periodo_dia_Tarde"
-      ],
-      "best_params": {
-        "subsample": 1.0,
-        "reg_lambda": 0.5,
-        "reg_alpha": 0.5,
-        "num_leaves": 127,
-        "n_estimators": 300,
-        "min_child_samples": 20,
-        "max_depth": 30,
-        "learning_rate": 0.05,
-        "colsample_bytree": 0.9
-      },
-      "models": {
-        "LGBMRegressor": {
-          "MAE": 0.449988,
-          "RMSE": 0.592199,
-          "R2": 0.320249,
-          "MAPE": 17.784526,
-          "WMAPE": 15.660451,
-          "Acuracia": 82.215474
-        },
-        "XGBRegressor": {
-          "MAE": 0.45217,
-          "RMSE": 0.607656,
-          "R2": 0.284302,
-          "MAPE": 17.865716,
-          "WMAPE": 15.73638,
-          "Acuracia": 82.134284
-        }
-      }
-    },
-    "SPLIT DUTO": {
+    "DESCONHECIDO": {
       "best_model": "XGBRegressor",
-      "n_train": 3006,
-      "n_test": 752,
-      "n_features": 21,
+      "n_train": 1186,
+      "n_test": 210,
+      "n_features": 24,
       "feature_columns": [
+        "consumo_lag_1h",
+        "consumo_lag_24h",
+        "consumo_rolling_mean_3h",
         "grupo_regional",
         "Temperatura_C",
         "Temperatura_Percebida_C",
@@ -139,57 +90,60 @@
         "Precipitacao_mm",
         "Velocidade_Vento_kmh",
         "Pressao_Superficial_hPa",
+        "Irradiancia_Direta_Wm2",
+        "Irradiancia_Difusa_Wm2",
         "trimestre",
         "is_feriado",
         "is_vespera_feriado",
         "is_dia_util",
         "hora_target_enc",
         "mes_target_enc",
-        "tipo_maquina_SPLIT DUTO",
+        "tipo_maquina_",
         "estacao_inverno",
-        "estacao_outono",
-        "estacao_verao",
         "periodo_dia_Madrugada",
         "periodo_dia_Manh\u00e3",
         "periodo_dia_Noite",
         "periodo_dia_Tarde"
       ],
       "best_params": {
-        "subsample": 0.9,
-        "reg_lambda": 1.0,
-        "reg_alpha": 0.1,
+        "subsample": 0.8,
+        "reg_lambda": 0.5,
+        "reg_alpha": 0.0,
         "n_estimators": 300,
         "min_child_weight": 1,
-        "max_depth": 10,
+        "max_depth": 7,
         "learning_rate": 0.1,
-        "gamma": 0.5,
+        "gamma": 0.0,
         "colsample_bytree": 1.0
       },
       "models": {
         "XGBRegressor": {
-          "MAE": 0.502242,
-          "RMSE": 0.780552,
-          "R2": 0.558513,
-          "MAPE": 16.219665,
-          "WMAPE": 13.390297,
-          "Acuracia": 83.780335
+          "MAE": 1.646838,
+          "RMSE": 1.999976,
+          "R2": 0.268175,
+          "MAPE": 119.746478,
+          "WMAPE": 48.336992,
+          "Acuracia": -19.746478
         },
         "LGBMRegressor": {
-          "MAE": 0.544874,
-          "RMSE": 0.813572,
-          "R2": 0.520371,
-          "MAPE": 17.23366,
-          "WMAPE": 14.526919,
-          "Acuracia": 82.76634
+          "MAE": 1.644128,
+          "RMSE": 1.998378,
+          "R2": 0.269344,
+          "MAPE": 119.874459,
+          "WMAPE": 48.25744,
+          "Acuracia": -19.874459
         }
       }
     },
     "SPLIT HI-WALL": {
       "best_model": "LGBMRegressor",
-      "n_train": 67157,
-      "n_test": 16790,
-      "n_features": 21,
+      "n_train": 282046,
+      "n_test": 49773,
+      "n_features": 27,
       "feature_columns": [
+        "consumo_lag_1h",
+        "consumo_lag_24h",
+        "consumo_rolling_mean_3h",
         "grupo_regional",
         "Temperatura_C",
         "Temperatura_Percebida_C",
@@ -197,6 +151,8 @@
         "Precipitacao_mm",
         "Velocidade_Vento_kmh",
         "Pressao_Superficial_hPa",
+        "Irradiancia_Direta_Wm2",
+        "Irradiancia_Difusa_Wm2",
         "trimestre",
         "is_feriado",
         "is_vespera_feriado",
@@ -206,6 +162,7 @@
         "tipo_maquina_SPLIT HI-WALL",
         "estacao_inverno",
         "estacao_outono",
+        "estacao_primavera",
         "estacao_verao",
         "periodo_dia_Madrugada",
         "periodo_dia_Manh\u00e3",
@@ -214,98 +171,43 @@
       ],
       "best_params": {
         "subsample": 1.0,
-        "reg_lambda": 0.5,
-        "reg_alpha": 0.5,
+        "reg_lambda": 0.1,
+        "reg_alpha": 0.1,
         "num_leaves": 127,
-        "n_estimators": 300,
-        "min_child_samples": 20,
-        "max_depth": 30,
-        "learning_rate": 0.05,
+        "n_estimators": 700,
+        "min_child_samples": 50,
+        "max_depth": 20,
+        "learning_rate": 0.1,
         "colsample_bytree": 0.9
       },
       "models": {
         "LGBMRegressor": {
-          "MAE": 0.202919,
-          "RMSE": 0.260348,
-          "R2": 0.350482,
-          "MAPE": 17.329082,
-          "WMAPE": 16.797566,
-          "Acuracia": 82.670918
+          "MAE": 0.015162,
+          "RMSE": 0.025216,
+          "R2": 0.734584,
+          "MAPE": 1.729793,
+          "WMAPE": 1.729473,
+          "Acuracia": 98.270207
         },
         "XGBRegressor": {
-          "MAE": 0.205827,
-          "RMSE": 0.262635,
-          "R2": 0.33902,
-          "MAPE": 17.565663,
-          "WMAPE": 17.038295,
-          "Acuracia": 82.434337
-        }
-      }
-    },
-    "SPLIT PISO-TETO": {
-      "best_model": "LGBMRegressor",
-      "n_train": 53525,
-      "n_test": 13382,
-      "n_features": 21,
-      "feature_columns": [
-        "grupo_regional",
-        "Temperatura_C",
-        "Temperatura_Percebida_C",
-        "Umidade_Relativa_%",
-        "Precipitacao_mm",
-        "Velocidade_Vento_kmh",
-        "Pressao_Superficial_hPa",
-        "trimestre",
-        "is_feriado",
-        "is_vespera_feriado",
-        "is_dia_util",
-        "hora_target_enc",
-        "mes_target_enc",
-        "tipo_maquina_SPLIT PISO-TETO",
-        "estacao_inverno",
-        "estacao_outono",
-        "estacao_verao",
-        "periodo_dia_Madrugada",
-        "periodo_dia_Manh\u00e3",
-        "periodo_dia_Noite",
-        "periodo_dia_Tarde"
-      ],
-      "best_params": {
-        "subsample": 1.0,
-        "reg_lambda": 0.5,
-        "reg_alpha": 0.5,
-        "num_leaves": 127,
-        "n_estimators": 300,
-        "min_child_samples": 20,
-        "max_depth": 30,
-        "learning_rate": 0.05,
-        "colsample_bytree": 0.9
-      },
-      "models": {
-        "LGBMRegressor": {
-          "MAE": 0.536117,
-          "RMSE": 0.664658,
-          "R2": 0.218668,
-          "MAPE": 21.739944,
-          "WMAPE": 20.403249,
-          "Acuracia": 78.260056
-        },
-        "XGBRegressor": {
-          "MAE": 0.540017,
-          "RMSE": 0.668621,
-          "R2": 0.209322,
-          "MAPE": 21.908679,
-          "WMAPE": 20.551678,
-          "Acuracia": 78.091321
+          "MAE": 0.017874,
+          "RMSE": 0.027056,
+          "R2": 0.694421,
+          "MAPE": 2.040125,
+          "WMAPE": 2.038918,
+          "Acuracia": 97.959875
         }
       }
     },
     "SPLIT\u00c3O": {
-      "best_model": "XGBRegressor",
-      "n_train": 12507,
-      "n_test": 3127,
-      "n_features": 21,
+      "best_model": "LGBMRegressor",
+      "n_train": 1511889,
+      "n_test": 266805,
+      "n_features": 27,
       "feature_columns": [
+        "consumo_lag_1h",
+        "consumo_lag_24h",
+        "consumo_rolling_mean_3h",
         "grupo_regional",
         "Temperatura_C",
         "Temperatura_Percebida_C",
@@ -313,6 +215,8 @@
         "Precipitacao_mm",
         "Velocidade_Vento_kmh",
         "Pressao_Superficial_hPa",
+        "Irradiancia_Direta_Wm2",
+        "Irradiancia_Difusa_Wm2",
         "trimestre",
         "is_feriado",
         "is_vespera_feriado",
@@ -322,6 +226,7 @@
         "tipo_maquina_SPLIT\u00c3O",
         "estacao_inverno",
         "estacao_outono",
+        "estacao_primavera",
         "estacao_verao",
         "periodo_dia_Madrugada",
         "periodo_dia_Manh\u00e3",
@@ -330,40 +235,43 @@
       ],
       "best_params": {
         "subsample": 1.0,
-        "reg_lambda": 2.0,
-        "reg_alpha": 0.0,
-        "n_estimators": 1000,
-        "min_child_weight": 5,
-        "max_depth": 10,
-        "learning_rate": 0.05,
-        "gamma": 0.5,
+        "reg_lambda": 0.1,
+        "reg_alpha": 0.1,
+        "num_leaves": 127,
+        "n_estimators": 700,
+        "min_child_samples": 50,
+        "max_depth": 20,
+        "learning_rate": 0.1,
         "colsample_bytree": 0.9
       },
       "models": {
-        "XGBRegressor": {
-          "MAE": 0.711474,
-          "RMSE": 0.929245,
-          "R2": 0.308993,
-          "MAPE": 10.301403,
-          "WMAPE": 10.419354,
-          "Acuracia": 89.698597
-        },
         "LGBMRegressor": {
-          "MAE": 0.716002,
-          "RMSE": 0.924045,
-          "R2": 0.316705,
-          "MAPE": 10.364915,
-          "WMAPE": 10.485661,
-          "Acuracia": 89.635085
+          "MAE": 0.548268,
+          "RMSE": 0.774296,
+          "R2": 0.614816,
+          "MAPE": 7.758908,
+          "WMAPE": 7.903813,
+          "Acuracia": 92.241092
+        },
+        "XGBRegressor": {
+          "MAE": 0.549727,
+          "RMSE": 0.774275,
+          "R2": 0.614837,
+          "MAPE": 7.780906,
+          "WMAPE": 7.924854,
+          "Acuracia": 92.219094
         }
       }
     },
     "SPLIT\u00c3O INVERTER": {
       "best_model": "LGBMRegressor",
-      "n_train": 1677,
-      "n_test": 420,
-      "n_features": 20,
+      "n_train": 148424,
+      "n_test": 26193,
+      "n_features": 27,
       "feature_columns": [
+        "consumo_lag_1h",
+        "consumo_lag_24h",
+        "consumo_rolling_mean_3h",
         "grupo_regional",
         "Temperatura_C",
         "Temperatura_Percebida_C",
@@ -371,6 +279,8 @@
         "Precipitacao_mm",
         "Velocidade_Vento_kmh",
         "Pressao_Superficial_hPa",
+        "Irradiancia_Direta_Wm2",
+        "Irradiancia_Difusa_Wm2",
         "trimestre",
         "is_feriado",
         "is_vespera_feriado",
@@ -380,47 +290,52 @@
         "tipo_maquina_SPLIT\u00c3O INVERTER",
         "estacao_inverno",
         "estacao_outono",
+        "estacao_primavera",
+        "estacao_verao",
         "periodo_dia_Madrugada",
         "periodo_dia_Manh\u00e3",
         "periodo_dia_Noite",
         "periodo_dia_Tarde"
       ],
       "best_params": {
-        "subsample": 0.7,
+        "subsample": 1.0,
         "reg_lambda": 0.1,
-        "reg_alpha": 0.1,
+        "reg_alpha": 0.5,
         "num_leaves": 31,
-        "n_estimators": 700,
-        "min_child_samples": 50,
+        "n_estimators": 1000,
+        "min_child_samples": 20,
         "max_depth": 10,
-        "learning_rate": 0.01,
-        "colsample_bytree": 1.0
+        "learning_rate": 0.1,
+        "colsample_bytree": 0.5
       },
       "models": {
         "LGBMRegressor": {
-          "MAE": 1.003576,
-          "RMSE": 1.890493,
-          "R2": 0.984787,
-          "MAPE": 14.768408,
-          "WMAPE": 5.381118,
-          "Acuracia": 85.231592
+          "MAE": 1.039635,
+          "RMSE": 1.492365,
+          "R2": 0.541303,
+          "MAPE": 16.449358,
+          "WMAPE": 16.769424,
+          "Acuracia": 83.550642
         },
         "XGBRegressor": {
-          "MAE": 1.005216,
-          "RMSE": 1.909485,
-          "R2": 0.98448,
-          "MAPE": 15.077836,
-          "WMAPE": 5.389913,
-          "Acuracia": 84.922164
+          "MAE": 1.039871,
+          "RMSE": 1.492974,
+          "R2": 0.540929,
+          "MAPE": 16.452883,
+          "WMAPE": 16.773242,
+          "Acuracia": 83.547117
         }
       }
     },
     "SPLIT\u00c3O ROOFTOP": {
       "best_model": "LGBMRegressor",
-      "n_train": 204,
-      "n_test": 52,
-      "n_features": 19,
+      "n_train": 1453,
+      "n_test": 257,
+      "n_features": 24,
       "feature_columns": [
+        "consumo_lag_1h",
+        "consumo_lag_24h",
+        "consumo_rolling_mean_3h",
         "grupo_regional",
         "Temperatura_C",
         "Temperatura_Percebida_C",
@@ -428,6 +343,8 @@
         "Precipitacao_mm",
         "Velocidade_Vento_kmh",
         "Pressao_Superficial_hPa",
+        "Irradiancia_Direta_Wm2",
+        "Irradiancia_Difusa_Wm2",
         "trimestre",
         "is_feriado",
         "is_vespera_feriado",
@@ -437,46 +354,49 @@
         "tipo_maquina_SPLIT\u00c3O ROOFTOP",
         "estacao_inverno",
         "estacao_outono",
+        "estacao_primavera",
         "periodo_dia_Manh\u00e3",
-        "periodo_dia_Noite",
         "periodo_dia_Tarde"
       ],
       "best_params": {
-        "subsample": 0.8,
-        "reg_lambda": 0.5,
-        "reg_alpha": 0.1,
-        "num_leaves": 63,
-        "n_estimators": 1000,
-        "min_child_samples": 50,
-        "max_depth": 30,
-        "learning_rate": 0.01,
+        "subsample": 1.0,
+        "reg_lambda": 0.0,
+        "reg_alpha": 0.0,
+        "num_leaves": 127,
+        "n_estimators": 500,
+        "min_child_samples": 20,
+        "max_depth": 10,
+        "learning_rate": 0.1,
         "colsample_bytree": 0.5
       },
       "models": {
         "LGBMRegressor": {
-          "MAE": 0.789972,
-          "RMSE": 1.004647,
-          "R2": 0.067528,
-          "MAPE": 10.440612,
-          "WMAPE": 9.976417,
-          "Acuracia": 89.559388
+          "MAE": 0.455762,
+          "RMSE": 0.900674,
+          "R2": 0.771952,
+          "MAPE": 5.215717,
+          "WMAPE": 5.139954,
+          "Acuracia": 94.784283
         },
         "XGBRegressor": {
-          "MAE": 0.801837,
-          "RMSE": 1.045276,
-          "R2": -0.009416,
-          "MAPE": 10.567198,
-          "WMAPE": 10.126259,
-          "Acuracia": 89.432802
+          "MAE": 0.470459,
+          "RMSE": 0.906762,
+          "R2": 0.768859,
+          "MAPE": 5.380887,
+          "WMAPE": 5.305709,
+          "Acuracia": 94.619113
         }
       }
     },
     "SPLIT\u00c3O SELF CONTAINED": {
-      "best_model": "XGBRegressor",
-      "n_train": 690,
-      "n_test": 173,
-      "n_features": 21,
+      "best_model": "LGBMRegressor",
+      "n_train": 319329,
+      "n_test": 56353,
+      "n_features": 27,
       "feature_columns": [
+        "consumo_lag_1h",
+        "consumo_lag_24h",
+        "consumo_rolling_mean_3h",
         "grupo_regional",
         "Temperatura_C",
         "Temperatura_Percebida_C",
@@ -484,6 +404,8 @@
         "Precipitacao_mm",
         "Velocidade_Vento_kmh",
         "Pressao_Superficial_hPa",
+        "Irradiancia_Direta_Wm2",
+        "Irradiancia_Difusa_Wm2",
         "trimestre",
         "is_feriado",
         "is_vespera_feriado",
@@ -493,6 +415,7 @@
         "tipo_maquina_SPLIT\u00c3O SELF CONTAINED",
         "estacao_inverno",
         "estacao_outono",
+        "estacao_primavera",
         "estacao_verao",
         "periodo_dia_Madrugada",
         "periodo_dia_Manh\u00e3",
@@ -501,31 +424,31 @@
       ],
       "best_params": {
         "subsample": 1.0,
-        "reg_lambda": 0.5,
-        "reg_alpha": 0.5,
-        "n_estimators": 300,
-        "min_child_weight": 3,
-        "max_depth": 5,
-        "learning_rate": 0.01,
-        "gamma": 0.0,
-        "colsample_bytree": 1.0
+        "reg_lambda": 0.1,
+        "reg_alpha": 0.1,
+        "num_leaves": 127,
+        "n_estimators": 700,
+        "min_child_samples": 50,
+        "max_depth": 20,
+        "learning_rate": 0.1,
+        "colsample_bytree": 0.9
       },
       "models": {
-        "XGBRegressor": {
-          "MAE": 0.226119,
-          "RMSE": 0.280137,
-          "R2": 0.272467,
-          "MAPE": 3.773149,
-          "WMAPE": 3.764105,
-          "Acuracia": 96.226851
-        },
         "LGBMRegressor": {
-          "MAE": 0.232066,
-          "RMSE": 0.28394,
-          "R2": 0.252579,
-          "MAPE": 3.872284,
-          "WMAPE": 3.863107,
-          "Acuracia": 96.127716
+          "MAE": 0.643065,
+          "RMSE": 0.9168,
+          "R2": 0.540147,
+          "MAPE": 8.157472,
+          "WMAPE": 8.380861,
+          "Acuracia": 91.842528
+        },
+        "XGBRegressor": {
+          "MAE": 0.643386,
+          "RMSE": 0.916794,
+          "R2": 0.540153,
+          "MAPE": 8.162529,
+          "WMAPE": 8.385048,
+          "Acuracia": 91.837471
         }
       }
     }

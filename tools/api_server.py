@@ -4,14 +4,17 @@ REST API Server para HVAC Predictions
 
 FastAPI server que expõe endpoints para predições com normalização automática.
 
-**Uso:**
-    >>> python -m tools.api_server
-    
-    # Ou com reload em desenvolvimento:
-    >>> uvicorn tools.api_server:app --reload --port 8000
+**Deploy (Railway):**
+    A porta é lida automaticamente da variável de ambiente PORT injetada pelo Railway.
+    Localmente, define PORT=8000 ou deixa o padrão.
 
-**Cliente (curl):**
-    >>> curl -X POST http://localhost:8000/predict \
+**Uso local:**
+    >>> python -m tools.api_server
+    >>> uvicorn tools.api_server:app --port 8000   # desenvolvimento
+
+**Cliente (curl) — Railway:**
+    >>> BASE="https://SEU-DOMINIO.up.railway.app"
+    >>> curl -X POST $BASE/predict \
     ...   -H "Content-Type: application/json" \
     ...   -d '{
     ...     "hora": 14,
@@ -24,29 +27,45 @@ FastAPI server que expõe endpoints para predições com normalização automát
     ...     "umidade_relativa_pct": 57.0,
     ...     "precipitacao_mm": 0.0,
     ...     "velocidade_vento_kmh": 21.4,
-    ...     "pressao_superficial_hpa": 969.8
+    ...     "pressao_superficial_hpa": 969.8,
+    ...     "irradiancia_direta_wm2": 520.0,
+    ...     "irradiancia_difusa_wm2": 180.0
     ...   }'
 
+**Cliente Python — Railway:**
+    >>> import requests
+    >>> BASE = "https://SEU-DOMINIO.up.railway.app"
+    >>> resp = requests.post(f"{BASE}/predict", json={
+    ...     "hora": 14, "data": "2025-07-03", "machine_type": "splitao",
+    ...     "latitude": -23.88, "longitude": -46.42,
+    ...     "temperatura_c": 25.7, "temperatura_percebida_c": 24.9,
+    ...     "umidade_relativa_pct": 57.0, "precipitacao_mm": 0.0,
+    ...     "velocidade_vento_kmh": 21.4, "pressao_superficial_hpa": 969.8,
+    ...     "irradiancia_direta_wm2": 520.0, "irradiancia_difusa_wm2": 180.0,
+    ... })
+    >>> print(resp.json())   # {"consumo_kwh": 6.32, "timestamp": "..."}
+
 **Documentação Interativa:**
-    - Swagger UI: http://localhost:8000/docs
-    - ReDoc: http://localhost:8000/redoc
+    - Swagger UI: https://SEU-DOMINIO.up.railway.app/docs
+    - ReDoc:      https://SEU-DOMINIO.up.railway.app/redoc
 """
 
 import logging
+import os
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-import numpy as np
 import polars as pl
 from fastapi import FastAPI, HTTPException, status
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 # Import condicional: relativo se rodado como módulo, absoluto se rodado direto
 try:
-    from .inference_api import HVACInferenceAPI
+    from .inference_runner import HVACDLInferenceAPI
 except ImportError:
-    from inference_api import HVACInferenceAPI
+    from tools.inference_runner import HVACDLInferenceAPI
 
 # ══════════════════════════════════════════════════════════════════════════════
 #  CONFIGURAÇÃO
@@ -59,6 +78,9 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
 )
 
+# Porta injetada pelo Railway em produção; fallback local para 8000
+_PORT = int(os.environ.get("PORT", 8000))
+
 app = FastAPI(
     title="HVAC Predictions API",
     description="API REST para predições de consumo energético de sistemas HVAC",
@@ -68,11 +90,19 @@ app = FastAPI(
     openapi_url="/openapi.json",
 )
 
+# CORS — permite requisições do domínio Railway e de clientes externos
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["GET", "POST"],
+    allow_headers=["*"],
+)
+
 # Inicializa a API de inferência (carregada uma única vez)
 _ROOT = Path(__file__).resolve().parent.parent
 _ARTIFACT_PATH = _ROOT / "model" / "artifacts" / "dl_hvac" / "global"
 
-_inference_api: Optional[HVACInferenceAPI] = None
+_inference_api: Optional[HVACDLInferenceAPI] = None
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -93,7 +123,9 @@ class PredictionRequest(BaseModel):
     precipitacao_mm: float = Field(..., ge=0, description="Precipitação em mm")
     velocidade_vento_kmh: float = Field(..., ge=0, description="Velocidade do vento em km/h")
     pressao_superficial_hpa: float = Field(..., description="Pressão em hPa")
-    
+    irradiancia_direta_wm2: float = Field(..., ge=0, description="Irradiância direta normal em W/m²")
+    irradiancia_difusa_wm2: float = Field(..., ge=0, description="Irradiância difusa horizontal em W/m²")
+
     class Config:
         json_schema_extra = {
             "example": {
@@ -108,6 +140,8 @@ class PredictionRequest(BaseModel):
                 "precipitacao_mm": 0.0,
                 "velocidade_vento_kmh": 21.4,
                 "pressao_superficial_hpa": 969.8,
+                "irradiancia_direta_wm2": 520.0,
+                "irradiancia_difusa_wm2": 180.0,
             }
         }
 
@@ -159,7 +193,7 @@ async def startup_event():
     
     try:
         _logger.info(f"Carregando artefato de {_ARTIFACT_PATH} ...")
-        _inference_api = HVACInferenceAPI(_ARTIFACT_PATH)
+        _inference_api = HVACDLInferenceAPI(_ARTIFACT_PATH)
         _logger.info("✔ Modelo carregado com sucesso")
     except Exception as e:
         _logger.error(f"✗ Erro ao carregar modelo: {e}")
@@ -205,7 +239,7 @@ async def predict_single(request: PredictionRequest):
     Realiza predição para um único registro.
     
     Args:
-        request: Dados de entrada com as 11 features obrigatórias
+        request: Dados de entrada com as 13 features obrigatórias
         
     Returns:
         PredictionResponse com consumo previsto em kWh
@@ -233,6 +267,8 @@ async def predict_single(request: PredictionRequest):
             "Precipitacao_mm": [request.precipitacao_mm],
             "Velocidade_Vento_kmh": [request.velocidade_vento_kmh],
             "Pressao_Superficial_hPa": [request.pressao_superficial_hpa],
+            "Irradiancia_Direta_Wm2": [request.irradiancia_direta_wm2],
+            "Irradiancia_Difusa_Wm2": [request.irradiancia_difusa_wm2],
         }).with_columns(pl.col("data").cast(pl.Date))
         
         # Prediz
@@ -304,6 +340,8 @@ async def predict_batch(request: BatchPredictionRequest):
             "Precipitacao_mm": [r.precipitacao_mm for r in request.records],
             "Velocidade_Vento_kmh": [r.velocidade_vento_kmh for r in request.records],
             "Pressao_Superficial_hPa": [r.pressao_superficial_hpa for r in request.records],
+            "Irradiancia_Direta_Wm2": [r.irradiancia_direta_wm2 for r in request.records],
+            "Irradiancia_Difusa_Wm2": [r.irradiancia_difusa_wm2 for r in request.records],
         }
         
         df = pl.DataFrame(data_dict).with_columns(pl.col("data").cast(pl.Date))
@@ -352,16 +390,120 @@ async def root():
 if __name__ == "__main__":
     import sys
     import uvicorn
-    
-    # Adiciona o diretório raiz ao path para suportar imports
+
     root_dir = Path(__file__).resolve().parent.parent
     if str(root_dir) not in sys.path:
         sys.path.insert(0, str(root_dir))
-    
-    uvicorn.run(
-        "tools.api_server:app",
-        host="0.0.0.0",
-        port=8000,
-        reload=True,
-        log_level="info",
-    )
+
+    # ── Modo: --test  →  cliente Railway | padrão → inicia servidor ──────────
+    # Uso:  python -m tools.api_server --test [URL]
+    #   URL opcional — sobrescreve RAILWAY_URL do ambiente.
+    #   Exemplo: python -m tools.api_server --test https://meu-app.up.railway.app
+
+    if "--test" in sys.argv:
+        import json
+        import requests as _req
+        from dotenv import load_dotenv
+
+        # Carrega .env da raiz do projeto (dois níveis acima de tools/)
+        load_dotenv(root_dir / ".env")
+
+        idx = sys.argv.index("--test")
+        _base = (
+            sys.argv[idx + 1]
+            if idx + 1 < len(sys.argv) and not sys.argv[idx + 1].startswith("-")
+            else os.environ.get("RAILWAY_URL", "http://localhost:8000")
+        ).rstrip("/")
+
+        W = 72
+        print("\n" + "=" * W)
+        print("  TESTE DE ENDPOINTS — Railway")
+        print("=" * W)
+        print(f"  Base URL: {_base}\n")
+
+        _PAYLOAD = {
+            "hora": 14,
+            "data": "2025-07-03",
+            "machine_type": "splitao",
+            "latitude": -23.883839,
+            "longitude": -46.4200317682745,
+            "temperatura_c": 25.7,
+            "temperatura_percebida_c": 24.9,
+            "umidade_relativa_pct": 57.0,
+            "precipitacao_mm": 0.0,
+            "velocidade_vento_kmh": 21.4,
+            "pressao_superficial_hpa": 969.8,
+            "irradiancia_direta_wm2": 520.0,
+            "irradiancia_difusa_wm2": 180.0,
+        }
+
+        def _req_test(method: str, path: str, **kwargs):
+            url = f"{_base}{path}"
+            try:
+                resp = _req.request(method, url, timeout=30, **kwargs)
+                ok   = resp.status_code < 300
+                tag  = "OK " if ok else "ERR"
+                print(f"  [{tag}] {method} {path}  →  HTTP {resp.status_code}")
+                return resp if ok else None
+            except _req.exceptions.RequestException as exc:
+                print(f"  [ERR] {method} {path}  →  {exc}")
+                return None
+
+        # ── GET / ─────────────────────────────────────────────────────────────
+        print("─" * W)
+        print("  [1] Root info")
+        print("─" * W)
+        r = _req_test("GET", "/")
+        if r:
+            print(f"  {json.dumps(r.json(), ensure_ascii=False, indent=4)}")
+
+        # ── GET /health ───────────────────────────────────────────────────────
+        print("\n" + "─" * W)
+        print("  [2] Health check")
+        print("─" * W)
+        r = _req_test("GET", "/health")
+        if r:
+            h = r.json()
+            print(f"  status       : {h.get('status')}")
+            print(f"  model_loaded : {h.get('model_loaded')}")
+            print(f"  artifact_path: {h.get('artifact_path')}")
+
+        # ── POST /predict ─────────────────────────────────────────────────────
+        print("\n" + "─" * W)
+        print("  [3] Predição simples  (/predict)")
+        print("─" * W)
+        print(f"  Payload: hora={_PAYLOAD['hora']}  data={_PAYLOAD['data']}"
+              f"  machine_type={_PAYLOAD['machine_type']!r}")
+        r = _req_test("POST", "/predict", json=_PAYLOAD)
+        if r:
+            body = r.json()
+            print(f"  consumo_kwh : {body.get('consumo_kwh'):.4f} kWh")
+            print(f"  timestamp   : {body.get('timestamp')}")
+
+        # ── POST /predict_batch ───────────────────────────────────────────────
+        print("\n" + "─" * W)
+        print("  [4] Predição em lote  (/predict_batch)  — 3 registros")
+        print("─" * W)
+        _batch_variants = [
+            {**_PAYLOAD, "hora": h, "temperatura_c": t}
+            for h, t in [(8, 18.0), (14, 25.7), (20, 22.3)]
+        ]
+        r = _req_test("POST", "/predict_batch", json={"records": _batch_variants})
+        if r:
+            body = r.json()
+            preds = body.get("predictions", [])
+            print(f"  n_records : {body.get('n_records')}")
+            for i, (v, p) in enumerate(zip(_batch_variants, preds)):
+                print(f"  [{i}] hora={v['hora']:>2}  Temp={v['temperatura_c']}°C"
+                      f"  →  {p:.4f} kWh")
+
+        print("\n" + "=" * W + "\n")
+
+    else:
+        uvicorn.run(
+            "tools.api_server:app",
+            host="0.0.0.0",
+            port=_PORT,
+            reload=False,
+            log_level="info",
+        )

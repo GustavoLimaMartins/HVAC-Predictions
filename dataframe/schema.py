@@ -1,6 +1,11 @@
+import sys
+from pathlib import Path
+
+# Adiciona o diretório raiz ao sys.path para permitir importações relativas
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 import polars as pl
 from dataframe.complementary import enrich_dataframe_with_all_features
-
 
 class DataFrameFormatter:
     """
@@ -12,7 +17,7 @@ class DataFrameFormatter:
     
     Example:
         >>> formatter = DataFrameFormatter()
-        >>> df_formatted = formatter.prepare_from_csv('consumption_consolidated.csv')
+        >>> df_formatted = formatter.prepare_from_parquet('consumption_consolidated.parquet')
     """
     
     def __init__(self):
@@ -107,22 +112,22 @@ class DataFrameFormatter:
         
         return df_clean
     
-    def prepare_from_csv(self, csv_path: str) -> pl.DataFrame:
+    def prepare_from_parquet(self, parquet_path: str) -> pl.DataFrame:
         """
-        Pipeline completo: carrega CSV, enriquece e formata para modelo.
+        Pipeline completo: carrega Parquet, enriquece e formata para modelo.
         
         Args:
-            csv_path: Caminho do arquivo CSV com dados de consumo
+            parquet_path: Caminho do arquivo Parquet com dados de consumo
         
         Returns:
             DataFrame formatado e enriquecido pronto para modelo
         
         Example:
             >>> formatter = DataFrameFormatter()
-            >>> df_ready = formatter.prepare_from_csv('consumption_consolidated.csv')
+            >>> df_ready = formatter.prepare_from_parquet('consumption_consolidated.parquet')
         """
-        # 1. Carrega CSV
-        df = pl.read_csv(csv_path)
+        # 1. Carrega Parquet
+        df = pl.read_parquet(parquet_path)
         
         # 2. Remove linhas com valores nulos
         df_clean = self.drop_null_rows(df)
@@ -136,18 +141,87 @@ class DataFrameFormatter:
         return df_formatted
 
 
-def prepare_dataframe_for_model(csv_path: str) -> pl.DataFrame:
+def prepare_dataframe_for_model(parquet_path: str) -> pl.DataFrame:
     """
-    Função helper para preparação completa de DataFrame a partir de CSV.
+    Função helper para preparação completa de DataFrame a partir de Parquet.
     
     Args:
-        csv_path: Caminho do arquivo CSV
+        parquet_path: Caminho do arquivo Parquet
     
     Returns:
         DataFrame formatado e enriquecido pronto para modelo
     
     Example:
-        >>> df_ready = prepare_dataframe_for_model('consumption_consolidated.csv')
+        >>> df_ready = prepare_dataframe_for_model('consumption_consolidated.parquet')
     """
     formatter = DataFrameFormatter()
-    return formatter.prepare_from_csv(csv_path)
+    return formatter.prepare_from_parquet(parquet_path)
+
+
+if __name__ == "__main__":
+    """
+    Módulo independente para criação de final_dataframe.parquet
+    a partir de consumption_consolidated.parquet.
+    
+    Uso:
+        python -m dataframe.schema
+        ou
+        python dataframe/schema.py
+    
+    Pré-requisito:
+        - use_case/files/consumption_consolidated.parquet deve existir
+    """
+    import sys
+    from pathlib import Path
+    
+    # Adiciona o diretório raiz do projeto ao sys.path para permitir importações
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    
+    print("=" * 80)
+    print("FORMATAÇÃO FINAL DO DATAFRAME PARA MODELO ML/DL")
+    print("=" * 80)
+    
+    # Caminhos dos arquivos
+    input_path = Path(r'use_case\files\consumption_consolidated.parquet')
+    output_path = Path(r'use_case\files\final_dataframe.parquet')
+    
+    # Verifica se o arquivo de entrada existe
+    if not input_path.exists():
+        print(f"\n✗ ERRO: Arquivo não encontrado: {input_path}")
+        print(f"  Execute main.py primeiro para gerar o arquivo de consumo consolidado.")
+        exit(1)
+    
+    try:
+        print(f"\n[1/5] Carregando dados de consumo consolidado...")
+        df_consolidated = pl.read_parquet(str(input_path))
+        print(f"✓ {df_consolidated.shape[0]} registros carregados")
+        print(f"  Colunas: {df_consolidated.columns}")
+        
+        print(f"\n[2/4] Enriquecendo com features complementares (estações, clima, grupos regionais)...")
+        df_enriched = enrich_dataframe_with_all_features(df_consolidated)
+        print(f"✓ Enriquecimento concluído")
+        print(f"  Registros após enriquecimento: {df_enriched.shape[0]}")
+        
+        print(f"\n[3/4] Formatando para modelo ML/DL...")
+        formatter = DataFrameFormatter()
+        df_formatted = formatter.format_for_model(df_enriched)
+        print(f"✓ Formatação concluída")
+        print(f"  Registros após formatação: {df_formatted.shape[0]}")
+        print(f"  Colunas finais: {df_formatted.columns}")
+        
+        # Salva o DataFrame formatado
+        print(f"\n[4/4] Salvando arquivo final...")
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        df_formatted.write_parquet(str(output_path))
+        print(f"✓ Arquivo salvo com sucesso: {output_path}")
+        
+        print("\n" + "=" * 80)
+        print("PROCESSAMENTO CONCLUÍDO")
+        print("=" * 80)
+        
+    except Exception as e:
+        print(f"\n✗ ERRO durante processamento: {e}")
+        import traceback
+        traceback.print_exc()
+        exit(1)
+

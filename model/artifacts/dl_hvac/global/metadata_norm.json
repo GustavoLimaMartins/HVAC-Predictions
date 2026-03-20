@@ -1,0 +1,293 @@
+{
+  "version": "1.0",
+  "timestamp": "2026-03-20T11:40:45",
+  "dense_features": {
+    "consumo_lag_1h": {
+      "mean": 0.5374816656112671,
+      "std": 0.11237025260925293,
+      "min": 0.3219054937362671,
+      "max": 1.0
+    },
+    "consumo_lag_24h": {
+      "mean": 0.5097817778587341,
+      "std": 0.15162204205989838,
+      "min": 0.19355323910713196,
+      "max": 1.0
+    },
+    "consumo_rolling_mean_3h": {
+      "mean": 0.5109809637069702,
+      "std": 0.14185810089111328,
+      "min": 0.23123690485954285,
+      "max": 1.0
+    },
+    "Temperatura_C": {
+      "mean": 0.49785178899765015,
+      "std": 0.11915313452482224,
+      "min": 0.0,
+      "max": 0.875
+    },
+    "Temperatura_Percebida_C": {
+      "mean": 0.4984881579875946,
+      "std": 0.11445751786231995,
+      "min": 0.0,
+      "max": 0.7767857313156128
+    },
+    "Umidade_Relativa_%": {
+      "mean": 0.5058885812759399,
+      "std": 0.11807020753622055,
+      "min": 0.078125,
+      "max": 0.796875
+    },
+    "Precipitacao_mm": {
+      "mean": 0.4794474244117737,
+      "std": 0.19874301552772522,
+      "min": 0.375,
+      "max": 1.0
+    },
+    "Velocidade_Vento_kmh": {
+      "mean": 0.4962473511695862,
+      "std": 0.11862211674451828,
+      "min": 0.2943548262119293,
+      "max": 1.0
+    },
+    "Pressao_Superficial_hPa": {
+      "mean": 0.5519405007362366,
+      "std": 0.10242640972137451,
+      "min": 0.06948010623455048,
+      "max": 0.6741014122962952
+    },
+    "Irradiancia_Direta_Wm2": {
+      "mean": 0.5126593112945557,
+      "std": 0.11707378178834915,
+      "min": 0.23280829191207886,
+      "max": 0.7240203619003296
+    },
+    "Irradiancia_Difusa_Wm2": {
+      "mean": 0.4909351170063019,
+      "std": 0.1346207559108734,
+      "min": 0.23164336383342743,
+      "max": 1.0
+    },
+    "trimestre": {
+      "mean": 3.144545316696167,
+      "std": 0.8144932389259338,
+      "min": 1.0,
+      "max": 4.0
+    },
+    "is_feriado": {
+      "mean": 0.006532029714435339,
+      "std": 0.08055657893419266,
+      "min": 0.0,
+      "max": 1.0
+    },
+    "is_vespera_feriado": {
+      "mean": 0.03475586324930191,
+      "std": 0.18316082656383514,
+      "min": 0.0,
+      "max": 1.0
+    },
+    "is_dia_util": {
+      "mean": 0.9739383459091187,
+      "std": 0.1593187302350998,
+      "min": 0.0,
+      "max": 1.0
+    },
+    "tipo_maquina_": {
+      "mean": 0.0005078970571048558,
+      "std": 0.022530848160386086,
+      "min": 0.0,
+      "max": 1.0
+    },
+    "tipo_maquina_AR CONDICIONADO DE JANELA (ACJ)": {
+      "mean": 0.00043865948100574315,
+      "std": 0.020939603447914124,
+      "min": 0.0,
+      "max": 1.0
+    },
+    "tipo_maquina_SPLIT HI-WALL": {
+      "mean": 0.12469964474439621,
+      "std": 0.3303780257701874,
+      "min": 0.0,
+      "max": 1.0
+    },
+    "tipo_maquina_SPLIT\u00c3O": {
+      "mean": 0.6674389839172363,
+      "std": 0.47113075852394104,
+      "min": 0.0,
+      "max": 1.0
+    },
+    "tipo_maquina_SPLIT\u00c3O INVERTER": {
+      "mean": 0.06549130380153656,
+      "std": 0.2473907619714737,
+      "min": 0.0,
+      "max": 1.0
+    },
+    "tipo_maquina_SPLIT\u00c3O ROOFTOP": {
+      "mean": 0.0006514836568385363,
+      "std": 0.025515861809253693,
+      "min": 0.0,
+      "max": 1.0
+    },
+    "tipo_maquina_SPLIT\u00c3O SELF CONTAINED": {
+      "mean": 0.1407720446586609,
+      "std": 0.3477862477302551,
+      "min": 0.0,
+      "max": 1.0
+    },
+    "estacao_inverno": {
+      "mean": 0.4209323227405548,
+      "std": 0.4937087297439575,
+      "min": 0.0,
+      "max": 1.0
+    },
+    "estacao_outono": {
+      "mean": 0.1613486111164093,
+      "std": 0.36785224080085754,
+      "min": 0.0,
+      "max": 1.0
+    },
+    "estacao_primavera": {
+      "mean": 0.37096232175827026,
+      "std": 0.48306241631507874,
+      "min": 0.0,
+      "max": 1.0
+    },
+    "estacao_verao": {
+      "mean": 0.04675672948360443,
+      "std": 0.21111735701560974,
+      "min": 0.0,
+      "max": 1.0
+    }
+  },
+  "target_encoding": {},
+  "clipping_limits": {
+    "Temperatura_C": {
+      "q1": 23.2,
+      "q3": 31.5,
+      "iqr": 8.3,
+      "lower": 10.749999999999998,
+      "upper": 43.95
+    },
+    "Temperatura_Percebida_C": {
+      "q1": 24.5,
+      "q3": 35.7,
+      "iqr": 11.200000000000003,
+      "lower": 7.699999999999996,
+      "upper": 52.50000000000001
+    },
+    "Umidade_Relativa_%": {
+      "q1": 46.0,
+      "q3": 78.0,
+      "iqr": 32.0,
+      "lower": -2.0,
+      "upper": 126.0
+    },
+    "Precipitacao_mm": {
+      "q1": 0.0,
+      "q3": 0.1,
+      "iqr": 0.1,
+      "lower": -0.15000000000000002,
+      "upper": 0.25
+    },
+    "Velocidade_Vento_kmh": {
+      "q1": 4.0,
+      "q3": 16.4,
+      "iqr": 12.399999999999999,
+      "lower": -14.599999999999998,
+      "upper": 35.0
+    },
+    "Pressao_Superficial_hPa": {
+      "q1": 935.9,
+      "q3": 1013.8,
+      "iqr": 77.89999999999998,
+      "lower": 819.05,
+      "upper": 1130.6499999999999
+    },
+    "Irradiancia_Direta_Wm2": {
+      "q1": 296.1,
+      "q3": 816.7,
+      "iqr": 520.6,
+      "lower": -484.80000000000007,
+      "upper": 1597.6000000000001
+    },
+    "Irradiancia_Difusa_Wm2": {
+      "q1": 82.0,
+      "q3": 225.0,
+      "iqr": 143.0,
+      "lower": -132.5,
+      "upper": 439.5
+    },
+    "consumo_lag_1h": {
+      "q1": 1.271,
+      "q3": 7.2542,
+      "iqr": 5.9832,
+      "lower": -7.7038,
+      "upper": 16.229
+    },
+    "consumo_lag_24h": {
+      "q1": 3.0733,
+      "q3": 7.3076,
+      "iqr": 4.234299999999999,
+      "lower": -3.278149999999999,
+      "upper": 13.659049999999999
+    },
+    "consumo_rolling_mean_3h": {
+      "q1": 2.7,
+      "q3": 7.1389,
+      "iqr": 4.438899999999999,
+      "lower": -3.9583499999999985,
+      "upper": 13.797249999999998
+    }
+  },
+  "embeddings": {
+    "grupo_regional": {
+      "input_dim": 192,
+      "value_range": [
+        0,
+        191
+      ]
+    },
+    "hora": {
+      "input_dim": 24,
+      "value_range": [
+        0,
+        23
+      ]
+    },
+    "mes": {
+      "input_dim": 13,
+      "value_range": [
+        1,
+        12
+      ]
+    },
+    "periodo_dia": {
+      "input_dim": 4,
+      "value_range": [
+        0,
+        3
+      ]
+    }
+  },
+  "metrics": {
+    "MAE": 0.5518791675567627,
+    "RMSE": 0.8754483164374198,
+    "R2": 0.8682000637054443,
+    "WMAPE": 8.844704627990723,
+    "Acuracia": 91.15529537200928
+  },
+  "train_info": {
+    "n_raw": 8249914,
+    "n_after_filter": 2665030,
+    "n_removed": 5584884,
+    "pct_removed": 67.7,
+    "n_train": 2152011,
+    "n_val": 113264,
+    "n_test": 399755,
+    "n_features_dense": 26,
+    "n_groups_embedding": 192,
+    "n_horas_embedding": 24,
+    "n_meses_embedding": 13,
+    "n_periodos_embedding": 4
+  }
+}

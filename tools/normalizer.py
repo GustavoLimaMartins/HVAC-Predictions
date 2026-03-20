@@ -98,6 +98,59 @@ _geo_labels: np.ndarray | None = None
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+#  NORMALIZATION STATS — Compute training statistics for inference
+# ══════════════════════════════════════════════════════════════════════════════
+
+def compute_normalization_stats(
+    X_dense: np.ndarray,
+    feature_names: list[str] | None = None,
+) -> dict:
+    """
+    Computes normalization statistics (mean, std, min, max) from training data
+    for use during inference normalization.
+    
+    Args:
+        X_dense: Training dense features array (shape: [n_samples, n_features])
+        feature_names: Optional feature names (defaults to feature_0, feature_1, ...)
+        
+    Returns:
+        Dictionary mapping feature names to their stats:
+        {
+            "feature_name": {
+                "mean": float,
+                "std": float,
+                "min": float,
+                "max": float,
+            },
+            ...
+        }
+    """
+    n_features = X_dense.shape[1]
+    if feature_names is None:
+        feature_names = [f"feature_{i}" for i in range(n_features)]
+    elif len(feature_names) != n_features:
+        raise ValueError(
+            f"feature_names length ({len(feature_names)}) must match "
+            f"X_dense columns ({n_features})"
+        )
+    
+    stats = {}
+    for i, name in enumerate(feature_names):
+        col = X_dense[:, i]
+        # Ignore NaN values in statistics
+        col_valid = col[~np.isnan(col)]
+        
+        stats[name] = {
+            "mean": float(np.mean(col_valid)) if len(col_valid) > 0 else 0.0,
+            "std": float(np.std(col_valid)) if len(col_valid) > 0 else 1.0,
+            "min": float(np.min(col_valid)) if len(col_valid) > 0 else 0.0,
+            "max": float(np.max(col_valid)) if len(col_valid) > 0 else 1.0,
+        }
+    
+    return stats
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 #  FEATURE DERIVER — Reaproveita ModelSchema + geo_reference.parquet
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -227,11 +280,16 @@ class FeatureDeriver:
             ValueError: Se latitude/longitude não estão presentes no DataFrame
             FileNotFoundError: Se geo_reference.parquet não existe
         """
-        # Valida presença de coordenadas
-        if "latitude" not in df.columns or "longitude" not in df.columns:
+        # Valida presença de dados geográficos.
+        # Aceita duas formas de entrada:
+        #   1) latitude/longitude para derivar grupo_regional via KNN
+        #   2) grupo_regional já pronto (sem coordenadas)
+        has_lat_lng = ("latitude" in df.columns and "longitude" in df.columns)
+        has_group = ("grupo_regional" in df.columns)
+        if not has_lat_lng and not has_group:
             raise ValueError(
-                "FeatureDeriver.derive() requer colunas 'latitude' e 'longitude' "
-                "para derivar grupo_regional via lookup geográfico"
+                "FeatureDeriver.derive() requer ('latitude' e 'longitude') "
+                "ou 'grupo_regional' já presente no input."
             )
         
         # Normaliza nome de coluna: tipo_maquina → machine_type se necessário
@@ -247,6 +305,7 @@ class FeatureDeriver:
         schema = ModelSchema.__new__(ModelSchema)
         schema.df = df.clone()
         schema._schema_fields = []
+        schema.clipping_limits_ = {}  # ✅ Inicializar atributo que foi bypassado pelo __new__()
         
         # Chama add_date_features() para derivar: mes, trimestre, 
         # is_feriado, is_vespera_feriado, is_dia_util, periodo_dia
@@ -270,7 +329,9 @@ class FeatureDeriver:
         
         # ── Deriva GRUPO REGIONAL via BallTree Haversine KNN-1 ──────────
         # Reaproveita geo_reference.parquet (gerado no treinamento)
-        df = _assign_grupo_regional_knn(df)
+        # Se grupo_regional já existir, preserva e não exige coordenadas.
+        if "grupo_regional" not in df.columns:
+            df = _assign_grupo_regional_knn(df)
         
         return df
 
@@ -331,6 +392,7 @@ class DLNormalizer:
         n_horas         : input_dim do Embedding de hora.
         n_meses         : input_dim do Embedding de mes.
         n_periodos      : input_dim do Embedding de periodo_dia.
+        clipping_limits : ✅ Novo - Limites de clipping persistidos {col: {lower, upper, ...}}.
     """
 
     feature_columns: list[str]
@@ -338,6 +400,7 @@ class DLNormalizer:
     n_horas:         int
     n_meses:         int
     n_periodos:      int
+    clipping_limits: dict | None = None  # ✅ Novo
 
     # ── Factory ──────────────────────────────────────────────────────────
 
@@ -355,6 +418,14 @@ class DLNormalizer:
         meta_path = Path(path) / "meta.json"
         with meta_path.open(encoding="utf-8") as fh:
             meta = json.load(fh)
+        
+        # ✅ Novo: carregar clipping_limits de metadata_norm.json
+        clipping_limits = None
+        norm_meta_path = Path(path) / "metadata_norm.json"
+        if norm_meta_path.exists():
+            with norm_meta_path.open(encoding="utf-8") as fh:
+                norm_meta = json.load(fh)
+                clipping_limits = norm_meta.get("clipping_limits")
 
         return cls(
             feature_columns=meta["feature_columns"],
@@ -362,6 +433,7 @@ class DLNormalizer:
             n_horas=meta.get("n_horas", 24),
             n_meses=meta.get("n_meses", 13),
             n_periodos=meta.get("n_periodos", 4),
+            clipping_limits=clipping_limits,  # ✅ Novo
         )
 
     # ── Transformação ────────────────────────────────────────────────────
@@ -429,16 +501,27 @@ class DLNormalizer:
         schema = ModelSchema.__new__(ModelSchema)
         schema.df = df.clone()
         schema._schema_fields = schema_fields_no_data
+        schema.clipping_limits_ = {}  # ✅ Inicializar atributo que foi bypassado pelo __new__()
         
         # Aplica transformações (sem add_date_features() que precisa de 'data')
         schema.adjust_machine_type()
         schema.make_categorical_columns(["grupo_regional"])
         schema.make_one_hot_encode_columns(["tipo_maquina", "estacao", "periodo_dia"])
-        schema.make_clipping_min_max_columns([
-            "Temperatura_C", "Temperatura_Percebida_C",
-            "Umidade_Relativa_%", "Precipitacao_mm",
-            "Velocidade_Vento_kmh", "Pressao_Superficial_hPa",
-        ])
+        
+        # ✅ NOVO: Se clipping_limits está disponível, usar limites persistidos do treino
+        if self.clipping_limits:
+            schema.clipping_limits_ = self.clipping_limits
+            schema.make_clipping_min_max_columns(
+                list(self.clipping_limits.keys()),
+                use_persisted_limits=True
+            )
+        else:
+            # Fallback: se não houver limits persistidos, usar comportamento antigo (não recomendado)
+            schema.make_clipping_min_max_columns([
+                "Temperatura_C", "Temperatura_Percebida_C",
+                "Umidade_Relativa_%", "Precipitacao_mm",
+                "Velocidade_Vento_kmh", "Pressao_Superficial_hPa",
+            ])
         
         df_ml = schema.df
 
@@ -583,10 +666,12 @@ class MLNormalizer:
     Attributes:
         feature_columns : Nomes das features, na ordem do treino.
         te_map          : Mapa de Target Encoding {col: {mapping, global_mean}}.
+        clipping_limits : ✅ Novo - Limites de clipping persistidos {col: {q1, q3, iqr, lower, upper}}.
     """
 
     feature_columns: list[str]
     te_map:          dict | None
+    clipping_limits: dict | None = None  # ✅ Novo
 
     # ── Factory ──────────────────────────────────────────────────────────
 
@@ -615,6 +700,7 @@ class MLNormalizer:
         return cls(
             feature_columns=pipe.feature_columns_,
             te_map=getattr(pipe, "_te_map", None),
+            clipping_limits=getattr(pipe, "_clipping_limits", None),  # ✅ Novo
         )
 
     # ── Transformação ────────────────────────────────────────────────────
@@ -670,6 +756,7 @@ class MLNormalizer:
         schema = ModelSchema.__new__(ModelSchema)
         schema.df = df.clone()
         schema._schema_fields = schema_fields_no_data
+        schema.clipping_limits_ = {}  # ✅ Inicializar atributo que foi bypassado pelo __new__()
         
         schema.adjust_machine_type()
 
@@ -682,11 +769,21 @@ class MLNormalizer:
         schema.make_one_hot_encode_columns(["tipo_maquina", "estacao", "periodo_dia"])
 
         # ── 5. Clipping + MinMax ─────────────────────────────────────────
-        schema.make_clipping_min_max_columns([
-            "Temperatura_C", "Temperatura_Percebida_C",
-            "Umidade_Relativa_%", "Precipitacao_mm",
-            "Velocidade_Vento_kmh", "Pressao_Superficial_hPa",
-        ])
+        # ✅ NOVO: Se clipping_limits está disponível, usar limites persistidos do treino
+        if self.clipping_limits:
+            # Reutilizar limites do treino em vez de recalcular
+            schema.clipping_limits_ = self.clipping_limits
+            schema.make_clipping_min_max_columns(
+                list(self.clipping_limits.keys()),
+                use_persisted_limits=True
+            )
+        else:
+            # Fallback: se não houver limits persistidos, usar comportamento antigo (não recomendado)
+            schema.make_clipping_min_max_columns([
+                "Temperatura_C", "Temperatura_Percebida_C",
+                "Umidade_Relativa_%", "Precipitacao_mm",
+                "Velocidade_Vento_kmh", "Pressao_Superficial_hPa",
+            ])
 
         df_ml = schema.df
 
